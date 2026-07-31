@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+
+# Build output and caches
+.next/
+out/
+dist/
+build/
+.turbo/
+.cache/
+*.tsbuildinfo
+
+# Tests
+coverage/
+playwright-report/
+test-results/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local databases and container data
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+.docker-data/
+
+# Deployment tooling
+.vercel/
+
+# Editors and operating systems
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
