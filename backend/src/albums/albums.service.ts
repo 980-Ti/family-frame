@@ -63,13 +63,12 @@ export class AlbumsService {
     if (!normalizedName) {
       throw new BadRequestException({ code: "INVALID_CHILD_TAG", message: "아이 이름을 입력해주세요." });
     }
-    const existing = await this.prisma.childTag.findUnique({
-      where: { albumId_name: { albumId, name: normalizedName } }
+    return this.prisma.childTag.create({ data: { albumId, name: normalizedName } }).catch((error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+        throw new ConflictException({ code: "CHILD_TAG_EXISTS", message: "이미 등록된 아이 이름입니다." });
+      }
+      throw error;
     });
-    if (existing) {
-      throw new ConflictException({ code: "CHILD_TAG_EXISTS", message: "이미 등록된 아이 이름입니다." });
-    }
-    return this.prisma.childTag.create({ data: { albumId, name: normalizedName } });
   }
 
   async deleteChildTag(userId: string, albumId: string, tagId: string): Promise<void> {

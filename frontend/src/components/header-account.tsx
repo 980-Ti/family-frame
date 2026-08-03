@@ -12,10 +12,11 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import { clientApi } from "@/lib/api";
+import { replaceDocument } from "@/lib/document-navigation";
 
 export async function logoutAndRedirect(): Promise<void> {
   await clientApi("/auth/logout", { method: "POST" });
-  window.location.replace("/login");
+  replaceDocument("/login");
 }
 
 export function HeaderAccount({ displayName }: { displayName: string }) {

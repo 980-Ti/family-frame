@@ -44,10 +44,10 @@ describe("header session", () => {
     expect(serverApiMock).toHaveBeenCalledTimes(1);
   });
 
-  it("retries a startup outage once without trapping the root layout in a request loop", async () => {
+  it("does not let a header lookup outage block public pages", async () => {
     serverApiMock.mockRejectedValue(new ServerApiError(503));
 
-    const result = expect(currentUser()).rejects.toMatchObject({ status: 503 });
+    const result = expect(currentUser()).resolves.toBeNull();
     await vi.advanceTimersByTimeAsync(10_000);
 
     await result;

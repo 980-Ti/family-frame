@@ -155,7 +155,7 @@ describe("child tag API", () => {
     });
   });
 
-  it("rejects a duplicate child tag in the same album", async () => {
+  it("returns a conflict when another request creates the same child tag first", async () => {
     const prisma = {
       familyMember: {
         findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
@@ -164,11 +164,8 @@ describe("child tag API", () => {
         findUnique: async () => ({ id: "album-1", familyId: "family-1", name: "우리의 여름" })
       },
       childTag: {
-        findUnique: async () => ({ id: "tag-1", albumId: "album-1", name: "민서" }),
-        create: async ({ data }: { data: { albumId: string; name: string } }) => ({
-          id: "tag-new",
-          ...data
-        })
+        findUnique: async () => null,
+        create: async () => Promise.reject({ code: "P2002" })
       }
     };
 

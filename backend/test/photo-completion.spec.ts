@@ -17,6 +17,94 @@ const png = Buffer.from(
 );
 
 describe("photo completion recovery", () => {
+  it("keeps a partially written media asset linked for retry or deletion", async () => {
+    const asset = {
+      id: "asset-1",
+      familyId: "family-1",
+      sha256: "hash",
+      mimeType: "image/png",
+      width: 1,
+      height: 1,
+      originalKey: "assets/family-1/hash/original",
+      displayKey: "assets/family-1/hash/display.webp",
+      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
+      status: "ORPHANED"
+    };
+    let storedAsset: typeof asset | null = null;
+    const photo = {
+      id: "photo-1",
+      albumId: "album-1",
+      albumDate: new Date("2026-08-03T00:00:00.000Z"),
+      uploadedById: "user-1",
+      originalName: "baby.png",
+      tempObjectKey: "temp/family-1/photo-1",
+      mediaAssetId: null as string | null,
+      status: "PENDING_UPLOAD",
+      album: { familyId: "family-1" },
+      mediaAsset: null
+    };
+    const updatePhoto = (data: Record<string, unknown>) => {
+      Object.assign(photo, data);
+      return { ...photo, mediaAsset: storedAsset };
+    };
+    const transaction = async (work: (tx: unknown) => Promise<unknown>) => work({
+      $executeRaw: async () => undefined,
+      mediaAsset: {
+        findUnique: async () => storedAsset,
+        upsert: async () => {
+          storedAsset = asset;
+          return storedAsset;
+        },
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(asset, data);
+          return asset;
+        }
+      },
+      photo: {
+        updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+          updatePhoto(data);
+          return { count: 1 };
+        },
+        findUnique: async () => ({ ...photo, mediaAsset: storedAsset })
+      },
+      dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
+    });
+    const prisma = {
+      photo: {
+        findUnique: async () => ({ ...photo }),
+        updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+          updatePhoto(data);
+          return { count: 1 };
+        },
+        update: async ({ data }: { data: Record<string, unknown> }) => updatePhoto(data)
+      },
+      mediaAsset: {
+        findUnique: async () => storedAsset,
+        upsert: async () => {
+          storedAsset = asset;
+          return storedAsset;
+        }
+      },
+      $transaction: transaction
+    } as unknown as PrismaService;
+    const albums = { requireAlbum: async () => ({ album: photo.album }) } as unknown as AlbumsService;
+    let writes = 0;
+    const storage = {
+      read: async () => ({ bytes: png, contentType: "image/png" }),
+      put: async () => {
+        if (photo.mediaAssetId !== asset.id) throw new Error("ASSET_NOT_RESERVED");
+        writes += 1;
+        if (writes === 2) throw new Error("DERIVATIVE_WRITE_FAILED");
+      },
+      delete: async () => undefined
+    } as unknown as StorageService;
+
+    await expect(new PhotosService(prisma, albums, storage).complete("user-1", photo.id))
+      .rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(photo).toMatchObject({ status: "FAILED", mediaAssetId: asset.id });
+    expect(storedAsset).toMatchObject({ status: "ORPHANED" });
+  });
+
   it("can retry when representative selection fails after processing", async () => {
     let representativeFails = true;
     let photo = {
@@ -79,6 +167,13 @@ describe("photo completion recovery", () => {
         const draft = { ...photo };
         const result = await work({
           $executeRaw: async () => undefined,
+          mediaAsset: {
+            upsert: async () => asset,
+            update: async ({ data }: { data: Record<string, unknown> }) => {
+              Object.assign(asset, data);
+              return asset;
+            }
+          },
           photo: {
             count: async () => 0,
             update: async ({ data }: { data: Record<string, unknown> }) => updatePhoto(data, draft),
@@ -177,6 +272,13 @@ describe("photo completion recovery", () => {
         photo.status = "DELETED";
         return work({
           $executeRaw: async () => undefined,
+          mediaAsset: {
+            upsert: async () => asset,
+            update: async ({ data }: { data: Record<string, unknown> }) => {
+              Object.assign(asset, data);
+              return asset;
+            }
+          },
           photo: {
             update: async ({ data }: { data: Record<string, unknown> }) => updatePhoto(data),
             updateMany: async ({ data }: { data: Record<string, unknown> }) => {

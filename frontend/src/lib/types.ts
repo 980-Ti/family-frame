@@ -9,8 +9,6 @@ export type Album = {
   id: string;
   familyId: string;
   name: string;
-  childName: string | null;
-  birthDate: string | null;
   childTags: ChildTag[];
 };
 

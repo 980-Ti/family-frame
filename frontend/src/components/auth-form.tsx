@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clientApi } from "@/lib/api";
+import { replaceDocument } from "@/lib/document-navigation";
 
 type AuthCredentials = {
   email: FormDataEntryValue | null;
@@ -19,7 +20,7 @@ export async function authenticateAndRedirect(
   credentials: AuthCredentials
 ): Promise<void> {
   await clientApi(`/auth/${mode}`, { method: "POST", body: JSON.stringify(credentials) });
-  window.location.replace("/families");
+  replaceDocument("/families");
 }
 
 export function AuthForm({ mode }: { mode: "login" | "signup" }) {

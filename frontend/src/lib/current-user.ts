@@ -14,6 +14,7 @@ export async function currentUser(): Promise<CurrentUser | null> {
     } catch (error) {
       if (error instanceof ServerApiError && error.status === 401) return null;
       const delay = retryDelays[attempt];
+      if (error instanceof ServerApiError && error.status === 503 && delay === undefined) return null;
       if (!(error instanceof ServerApiError) || error.status !== 503 || delay === undefined) {
         throw error;
       }

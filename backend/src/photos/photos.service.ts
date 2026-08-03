@@ -258,36 +258,55 @@ export class PhotosService {
       const displayKey = `${prefix}/display.webp`;
       const thumbnailKey = `${prefix}/thumbnail.webp`;
 
-      const existing = await this.prisma.mediaAsset.findUnique({
-        where: { familyId_sha256: { familyId: photo.album.familyId, sha256 } }
+      const reservation = await this.prisma.$transaction(async (tx) => {
+        const assetLockKey = `asset:${photo.album.familyId}:${sha256}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
+        const asset = await tx.mediaAsset.upsert({
+          where: { familyId_sha256: { familyId: photo.album.familyId, sha256 } },
+          update: {},
+          create: {
+            familyId: photo.album.familyId,
+            sha256,
+            mimeType: source.contentType ?? `image/${metadata.format}`,
+            width: metadata.width,
+            height: metadata.height,
+            originalKey,
+            displayKey,
+            thumbnailKey,
+            status: "ORPHANED"
+          }
+        });
+        const reserved = await tx.photo.updateMany({
+          where: { id: photo.id, status: "PROCESSING" },
+          data: { mediaAssetId: asset.id }
+        });
+        if (reserved.count === 0) {
+          throw new ConflictException({
+            code: "PHOTO_STATE_CHANGED",
+            message: "사진 상태가 변경되어 처리를 완료하지 않았습니다."
+          });
+        }
+        return { asset, needsUpload: asset.status !== "READY" };
       });
-      if (!existing || existing.status !== "READY") {
+      if (reservation.needsUpload) {
         await Promise.all([
           this.storage.put(originalKey, source.bytes, source.contentType ?? "application/octet-stream"),
           this.storage.put(displayKey, display, "image/webp"),
           this.storage.put(thumbnailKey, thumbnail, "image/webp")
         ]);
       }
-      const asset = await this.prisma.mediaAsset.upsert({
-        where: { familyId_sha256: { familyId: photo.album.familyId, sha256 } },
-        update: { status: "READY" },
-        create: {
-          familyId: photo.album.familyId,
-          sha256,
-          mimeType: source.contentType ?? `image/${metadata.format}`,
-          width: metadata.width,
-          height: metadata.height,
-          originalKey,
-          displayKey,
-          thumbnailKey
-        }
-      });
       const ready = await this.prisma.$transaction(async (tx) => {
+        const assetLockKey = `asset:${photo.album.familyId}:${sha256}`;
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
         const lockKey = `${photo.albumId}:${photo.albumDate.toISOString().slice(0, 10)}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+        await tx.mediaAsset.update({
+          where: { id: reservation.asset.id },
+          data: { status: "READY" }
+        });
         const committed = await tx.photo.updateMany({
           where: { id: photo.id, status: "PROCESSING" },
-          data: { mediaAssetId: asset.id, status: "READY", failureReason: null }
+          data: { mediaAssetId: reservation.asset.id, status: "READY", failureReason: null }
         });
         if (committed.count === 0) {
           throw new ConflictException({

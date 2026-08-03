@@ -15,6 +15,7 @@ node_modules/
 out/
 dist/
 build/
+backend/src/generated/prisma/
 .turbo/
 .cache/
 .eslintcache
