@@ -92,7 +92,8 @@ export function PhotoGallery({
   uploadHref,
   emptyTitle = "아직 사진이 없습니다",
   emptyDescription = "이 날짜의 첫 번째 사진을 추가해 보세요.",
-  showDate = false
+  showDate = false,
+  onPhotoRemoved
 }: {
   photos: Photo[];
   currentUserId: string;
@@ -101,6 +102,7 @@ export function PhotoGallery({
   emptyTitle?: string;
   emptyDescription?: string;
   showDate?: boolean;
+  onPhotoRemoved?: (photoId: string) => void;
 }) {
   const router = useRouter();
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
@@ -224,8 +226,9 @@ export function PhotoGallery({
     try {
       await clientApi(`/photos/${selected.id}`, { method: "DELETE" });
       setRemovedIds((current) => new Set(current).add(selected.id));
+      onPhotoRemoved?.(selected.id);
       close();
-      router.refresh();
+      if (!onPhotoRemoved) router.refresh();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "사진을 삭제하지 못했습니다.");
     } finally {
@@ -421,7 +424,7 @@ export function PhotoGallery({
                 {(canDeleteAll || selected.uploadedById === currentUserId) && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button variant="ghost" className="shrink-0 text-[#ff8b82] hover:bg-white/10 hover:text-[#ffaaa3]" disabled={deleting || !imageReady}>
+                      <Button aria-label={deleting ? "사진 삭제 중" : "사진 삭제"} variant="ghost" className="shrink-0 text-[#ff8b82] hover:bg-white/10 hover:text-[#ffaaa3]" disabled={deleting || !imageReady}>
                         <Trash2 aria-hidden="true" />
                         <span className="hidden sm:inline">{deleting ? "삭제 중…" : "사진 삭제"}</span>
                       </Button>

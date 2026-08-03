@@ -101,6 +101,15 @@ describe("child tag API", () => {
   });
 
   it("adds a child tag to an existing album", async () => {
+    const childTag = {
+      count: async () => 2,
+      create: async ({ data }: { data: { albumId: string; name: string } }) => ({
+        id: "tag-3",
+        albumId: data.albumId,
+        name: data.name
+      })
+    };
+    const tx = { $executeRaw: async () => undefined, childTag };
     const prisma = {
       familyMember: {
         findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
@@ -108,14 +117,8 @@ describe("child tag API", () => {
       album: {
         findUnique: async () => ({ id: "album-1", familyId: "family-1", name: "우리의 여름" })
       },
-      childTag: {
-        findUnique: async () => null,
-        create: async ({ data }: { data: { albumId: string; name: string } }) => ({
-          id: "tag-3",
-          albumId: data.albumId,
-          name: data.name
-        })
-      }
+      childTag,
+      $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx)
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -156,6 +159,11 @@ describe("child tag API", () => {
   });
 
   it("returns a conflict when another request creates the same child tag first", async () => {
+    const childTag = {
+      count: async () => 1,
+      create: async () => Promise.reject({ code: "P2002" })
+    };
+    const tx = { $executeRaw: async () => undefined, childTag };
     const prisma = {
       familyMember: {
         findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
@@ -163,10 +171,8 @@ describe("child tag API", () => {
       album: {
         findUnique: async () => ({ id: "album-1", familyId: "family-1", name: "우리의 여름" })
       },
-      childTag: {
-        findUnique: async () => null,
-        create: async () => Promise.reject({ code: "P2002" })
-      }
+      childTag,
+      $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx)
     };
 
     const moduleRef = await Test.createTestingModule({
@@ -200,6 +206,33 @@ describe("child tag API", () => {
       .expect(409);
 
     expect(response.body).toMatchObject({ code: "CHILD_TAG_EXISTS" });
+  });
+
+  it("rejects more than ten child tags in an album", async () => {
+    const create = vi.fn();
+    const tx = {
+      $executeRaw: async () => undefined,
+      childTag: { count: async () => 10, create }
+    };
+    const prisma = {
+      familyMember: {
+        findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
+      },
+      album: {
+        findUnique: async () => ({ id: "album-1", familyId: "family-1", name: "우리의 여름" })
+      },
+      childTag: { create },
+      $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx)
+    };
+    app = await createChildTagTestApp(prisma);
+
+    const response = await request(app.getHttpServer())
+      .post("/albums/album-1/child-tags")
+      .send({ name: "열한째" })
+      .expect(409);
+
+    expect(response.body).toMatchObject({ code: "CHILD_TAG_LIMIT" });
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("deletes an owned album child tag without deleting a photo", async () => {

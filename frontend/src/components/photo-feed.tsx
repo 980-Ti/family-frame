@@ -27,25 +27,27 @@ export function PhotoFeed({
   uploadHref: string;
   emptyTitle: string;
 }) {
-  const [photos, setPhotos] = useState<Photo[]>(initialPage.items);
-  const [nextCursor, setNextCursor] = useState(initialPage.nextCursor);
+  const [page, setPage] = useState(initialPage);
+  const { items: photos, nextCursor } = page;
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const sentinelRef = useRef<HTMLDivElement | null>(null);
   const loadingRef = useRef(false);
 
-  const loadMore = useCallback(async () => {
-    if (!nextCursor || loadingRef.current) return;
+  const loadPage = useCallback(async (reset = false) => {
+    if ((!nextCursor && !reset) || loadingRef.current) return;
     loadingRef.current = true;
     setLoading(true);
     setError("");
     try {
       const separator = feedPath.includes("?") ? "&" : "?";
       const page = await clientApi<PhotoFeedPage>(
-        `${feedPath}${separator}cursor=${encodeURIComponent(nextCursor)}`
+        reset ? feedPath : `${feedPath}${separator}cursor=${encodeURIComponent(nextCursor!)}`
       );
-      setPhotos((current) => appendUniquePhotos(current, page.items));
-      setNextCursor(page.nextCursor);
+      setPage((current) => reset ? page : ({
+        items: appendUniquePhotos(current.items, page.items),
+        nextCursor: page.nextCursor
+      }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "사진을 더 불러오지 못했습니다.");
     } finally {
@@ -53,6 +55,20 @@ export function PhotoFeed({
       setLoading(false);
     }
   }, [feedPath, nextCursor]);
+
+  const loadMore = useCallback(() => loadPage(photos.length === 0), [loadPage, photos.length]);
+
+  const handlePhotoRemoved = useCallback((photoId: string) => {
+    const items = page.items.filter(({ id }) => id !== photoId);
+    const exhausted = page.nextCursor === photoId && items.length === 0;
+    setPage({
+      items,
+      nextCursor: page.nextCursor === photoId
+        ? items.at(-1)?.id ?? (exhausted ? photoId : null)
+        : page.nextCursor
+    });
+    if (exhausted) void loadPage(true);
+  }, [loadPage, page]);
 
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -75,6 +91,7 @@ export function PhotoFeed({
         emptyTitle={emptyTitle}
         emptyDescription="다른 필터를 선택하거나 새 사진을 추가해 보세요."
         showDate
+        onPhotoRemoved={handlePhotoRemoved}
       />
       {nextCursor ? (
         <div

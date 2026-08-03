@@ -41,10 +41,9 @@
     "@types/node": "24.10.1",
     "@types/pg": "8.15.6",
     "@types/supertest": "6.0.3",
-    "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "9.39.2",
     "supertest": "7.2.2",
-    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript": "5.9.3",
     "typescript-eslint": "8.65.0",
     "vitest": "4.1.10"
   }

@@ -26,12 +26,11 @@
     "@types/node": "24.10.1",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@typescript/native": "npm:typescript@7.0.2",
     "eslint": "9.39.2",
     "eslint-config-next": "16.2.12",
     "jsdom": "^30.0.1",
     "tailwindcss": "4.3.3",
-    "typescript": "npm:@typescript/typescript6@6.0.2",
+    "typescript": "5.9.3",
     "vitest": "4.1.10"
   }
 }

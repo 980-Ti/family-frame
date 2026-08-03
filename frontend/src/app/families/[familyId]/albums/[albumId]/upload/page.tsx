@@ -12,7 +12,10 @@ export default async function UploadPage({
 }) {
   const { familyId, albumId } = await params;
   const defaultDate = (await searchParams).date;
-  const albums = await protectedApi<Album[]>(`/families/${familyId}/albums`);
+  const returnTo = `/families/${familyId}/albums/${albumId}/upload${
+    defaultDate ? `?${new URLSearchParams({ date: defaultDate })}` : ""
+  }`;
+  const albums = await protectedApi<Album[]>(`/families/${familyId}/albums`, returnTo);
   const album = albums.find((item) => item.id === albumId);
   if (!album) notFound();
 

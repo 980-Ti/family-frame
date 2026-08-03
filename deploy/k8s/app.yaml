@@ -28,18 +28,21 @@ spec:
                   name: family-frame-config
                   key: API_ORIGIN
           startupProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: http
             periodSeconds: 2
             failureThreshold: 30
           readinessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: http
             periodSeconds: 5
             timeoutSeconds: 2
             failureThreshold: 3
           livenessProbe:
-            tcpSocket:
+            httpGet:
+              path: /healthz
               port: http
             periodSeconds: 10
             timeoutSeconds: 2
@@ -150,6 +153,39 @@ spec:
     - name: http
       port: 4000
       targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: family-frame-auth-rate-limit
+  namespace: family-frame
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rpm: "5"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "1"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - family-frame.example.com
+      secretName: family-frame-tls
+  rules:
+    - host: family-frame.example.com
+      http:
+        paths:
+          - path: /api/auth/login
+            pathType: Exact
+            backend:
+              service:
+                name: family-frame-backend
+                port:
+                  name: http
+          - path: /api/auth/signup
+            pathType: Exact
+            backend:
+              service:
+                name: family-frame-backend
+                port:
+                  name: http
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress

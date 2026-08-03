@@ -46,9 +46,7 @@ const DATE_SOURCE_LABEL: Record<PhotoDateSource, string> = {
 const ALLOWED_TYPES = new Set([
   "image/jpeg",
   "image/png",
-  "image/webp",
-  "image/heic",
-  "image/heif"
+  "image/webp"
 ]);
 
 function localToday() {
@@ -59,11 +57,22 @@ function localToday() {
 }
 
 function contentType(file: File) {
-  if (file.type) return file.type;
-  const extension = file.name.split(".").pop()?.toLowerCase();
-  if (extension === "heic") return "image/heic";
-  if (extension === "heif") return "image/heif";
-  return "";
+  return file.type;
+}
+
+export async function uploadPhotoObject(url: string, file: File): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": contentType(file) },
+      body: file,
+      signal: AbortSignal.timeout(300_000)
+    });
+  } catch {
+    throw new Error("사진 전송 시간이 초과되었거나 연결이 끊겼습니다.");
+  }
+  if (!response.ok) throw new Error("사진 전송에 실패했습니다.");
 }
 
 export function uploadStartPayload(photo: PendingPhoto) {
@@ -122,42 +131,41 @@ export function UploadForm({
       return;
     }
     if (files.some((file) => !ALLOWED_TYPES.has(contentType(file)))) {
-      setMessage("JPG, PNG, WebP, HEIC 사진만 올릴 수 있어요.");
+      setMessage("JPG, PNG, WebP 사진만 올릴 수 있어요.");
       return;
     }
 
+    previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
+    previewUrls.current.clear();
+    setPhotos([]);
     setReading(true);
     try {
-      const nextPhotos = await Promise.all(
-        files.map(async (file) => {
-          const metadata = await exifr
-            .parse(file, ["DateTimeOriginal", "CreateDate"])
-            .catch(() => undefined) as
-            | { DateTimeOriginal?: Date; CreateDate?: Date }
-            | undefined;
-          const suggestion = suggestPhotoDate({
-            defaultDate,
-            dateTimeOriginal: metadata?.DateTimeOriginal,
-            createDate: metadata?.CreateDate,
-            fileLastModified: file.lastModified
-              ? new Date(file.lastModified)
-              : undefined,
-            today: localToday()
-          });
+      const nextPhotos: PendingPhoto[] = [];
+      for (const file of files) {
+        const metadata = await exifr
+          .parse(file, ["DateTimeOriginal", "CreateDate"])
+          .catch(() => undefined) as
+          | { DateTimeOriginal?: Date; CreateDate?: Date }
+          | undefined;
+        const suggestion = suggestPhotoDate({
+          defaultDate,
+          dateTimeOriginal: metadata?.DateTimeOriginal,
+          createDate: metadata?.CreateDate,
+          fileLastModified: file.lastModified
+            ? new Date(file.lastModified)
+            : undefined,
+          today: localToday()
+        });
 
-          const previewUrl = URL.createObjectURL(file);
-          return {
-            id: crypto.randomUUID(),
-            file,
-            childTagIds: selectedTagIds,
-            previewUrl,
-            status: "ready" as const,
-            ...suggestion
-          };
-        })
-      );
-      previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
-      previewUrls.current.clear();
+        nextPhotos.push({
+          id: crypto.randomUUID(),
+          file,
+          childTagIds: selectedTagIds,
+          previewUrl: URL.createObjectURL(file),
+          status: "ready",
+          ...suggestion
+        });
+      }
       nextPhotos.forEach((photo) => previewUrls.current.add(photo.previewUrl));
       setPhotos(nextPhotos);
     } finally {
@@ -233,16 +241,11 @@ export function UploadForm({
             }
           );
           if (start.uploadUrl) {
-            const response = await fetch(start.uploadUrl, {
-              method: "PUT",
-              headers: { "Content-Type": contentType(photo.file) },
-              body: photo.file
-            });
-            if (!response.ok) throw new Error("사진 전송에 실패했습니다.");
+            await uploadPhotoObject(start.uploadUrl, photo.file);
           }
           await clientApi(`/photos/${start.photoId}/complete`, {
             method: "POST"
-          });
+          }, 120_000);
           completed += 1;
           setPhotos((current) =>
             current.map((item) =>
@@ -330,13 +333,13 @@ export function UploadForm({
           {reading ? "날짜를 확인하고 있어요…" : "사진 선택"}
         </span>
         <span className="muted mt-2 text-[15px]">
-          JPG, PNG, WebP, HEIC · 한 번에 최대 10장
+          JPG, PNG, WebP · 한 번에 최대 10장
         </span>
         <input
           className="sr-only"
           name="photos"
           type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"
+          accept="image/jpeg,image/png,image/webp"
           multiple
           disabled={reading || uploading}
           onChange={selectPhotos}
@@ -362,6 +365,8 @@ export function UploadForm({
                   alt=""
                   width={80}
                   height={80}
+                  loading="lazy"
+                  decoding="async"
                   className="size-16 shrink-0 rounded-lg bg-secondary object-cover sm:size-20"
                 />
                 <div className="min-w-0 flex-1">

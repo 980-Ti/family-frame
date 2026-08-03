@@ -14,7 +14,8 @@ export default async function SettingsPage({
   params: Promise<{ familyId: string; albumId: string }>;
 }) {
   const { familyId, albumId } = await params;
-  const families = await protectedApi<Family[]>("/families");
+  const returnTo = `/families/${familyId}/albums/${albumId}/settings`;
+  const families = await protectedApi<Family[]>("/families", returnTo);
   const family = families.find((item) => item.id === familyId);
   const album = family?.albums.find((item) => item.id === albumId);
   if (!family || !album) notFound();

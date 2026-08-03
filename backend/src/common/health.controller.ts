@@ -18,7 +18,7 @@ export class HealthController {
   async ready() {
     try {
       await Promise.all([
-        this.prisma.$queryRaw`SELECT 1`,
+        this.prisma.assertSchemaReady(),
         this.storage.check()
       ]);
       return { status: "ready" };

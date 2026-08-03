@@ -1,13 +1,14 @@
 import { redirect } from "next/navigation";
 import { AuthForm } from "@/components/auth-form";
-import { ServerApiError, serverApi } from "@/lib/server-api";
+import { currentUser } from "@/lib/current-user";
+import { safeReturnTo } from "@/lib/return-to";
 
-export default async function LoginPage() {
-  try {
-    await serverApi("/auth/me");
-    redirect("/families");
-  } catch (error) {
-    if (!(error instanceof ServerApiError) || ![401, 503].includes(error.status)) throw error;
-  }
-  return <AuthForm mode="login" />;
+export default async function LoginPage({
+  searchParams
+}: {
+  searchParams: Promise<{ returnTo?: string }>;
+}) {
+  const returnTo = safeReturnTo((await searchParams).returnTo);
+  if (await currentUser()) redirect(returnTo);
+  return <AuthForm mode="login" returnTo={returnTo} />;
 }

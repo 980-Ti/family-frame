@@ -12,4 +12,8 @@ export class PrismaService extends PrismaClient implements OnModuleDestroy {
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }
+
+  async assertSchemaReady(): Promise<void> {
+    await this.$queryRaw`SELECT 'DELETING'::"AssetStatus", "updatedAt" FROM "MediaAsset" LIMIT 0`;
+  }
 }

@@ -1,13 +1,15 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { AlbumBrowserHeader } from "@/components/album-browser-header";
 import { ChildTagFilter } from "@/components/child-tag-filter";
 import { PhotoFeed } from "@/components/photo-feed";
 import {
   parsePhotoFilter,
   photoFilterApiParams,
-  photoFilterKey
+  photoFilterKey,
+  photoFilterPageParams
 } from "@/lib/photo-filter";
 import { currentAlbumMonth } from "@/lib/photo-date";
+import { currentUser } from "@/lib/current-user";
 import { protectedApi } from "@/lib/protected-api";
 import type { Family, PhotoFeedPage } from "@/lib/types";
 
@@ -27,11 +29,14 @@ export default async function PhotosPage({
   const filter = parsePhotoFilter(await searchParams);
   const apiQuery = photoFilterApiParams(filter, { take: "40" });
   const feedPath = `/albums/${albumId}/photo-feed?${apiQuery}`;
-  const [initialPage, families, session] = await Promise.all([
-    protectedApi<PhotoFeedPage>(feedPath),
-    protectedApi<Family[]>("/families"),
-    protectedApi<{ user: { id: string } }>("/auth/me")
+  const pageQuery = photoFilterPageParams(filter).toString();
+  const returnTo = `/families/${familyId}/albums/${albumId}/photos${pageQuery ? `?${pageQuery}` : ""}`;
+  const [initialPage, families, user] = await Promise.all([
+    protectedApi<PhotoFeedPage>(feedPath, returnTo),
+    protectedApi<Family[]>("/families", returnTo),
+    currentUser()
   ]);
+  if (!user) redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   const family = families.find((item) => item.id === familyId);
   const album = family?.albums.find((item) => item.id === albumId);
   if (!family || !album) notFound();
@@ -65,10 +70,10 @@ export default async function PhotosPage({
         filter={filter}
       />
       <PhotoFeed
-        key={photoFilterKey(filter)}
+        key={`${albumId}:${photoFilterKey(filter)}`}
         initialPage={initialPage}
         feedPath={feedPath}
-        currentUserId={session.user.id}
+        currentUserId={user.id}
         canDeleteAll={family.members[0]?.role === "OWNER"}
         uploadHref={`/families/${familyId}/albums/${albumId}/upload`}
         emptyTitle={emptyTitle}

@@ -32,6 +32,7 @@ enum PhotoDateSource {
 enum AssetStatus {
   READY
   ORPHANED
+  DELETING
 }
 
 model User {
@@ -132,6 +133,7 @@ model MediaAsset {
   thumbnailKey String
   status       AssetStatus @default(READY)
   createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
   family       Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
   photos       Photo[]
 
@@ -162,6 +164,7 @@ model Photo {
 
   @@unique([albumId, clientUploadId])
   @@index([albumId, albumDate, status])
+  @@index([albumId, status, albumDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "Photo_feed_idx")
   @@index([mediaAssetId])
 }
 

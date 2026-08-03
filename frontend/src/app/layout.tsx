@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import Link from "next/link";
 import { HeaderAccount } from "@/components/header-account";
 import { currentUser } from "@/lib/current-user";
+import { ServerApiError } from "@/lib/server-api";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -12,7 +13,14 @@ export const metadata: Metadata = {
 export const viewport: Viewport = { themeColor: "#f3f6f2" };
 
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const user = await currentUser();
+  let user = null;
+  let accountUnavailable = false;
+  try {
+    user = await currentUser();
+  } catch (error) {
+    if (!(error instanceof ServerApiError) || error.status !== 503) throw error;
+    accountUnavailable = true;
+  }
 
   return (
     <html lang="ko">
@@ -29,7 +37,11 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
               <span className="brand-mark" aria-hidden="true">F</span>
               <span className="brand text-lg font-extrabold">Family Frame</span>
             </Link>
-            {user && <HeaderAccount displayName={user.displayName} />}
+            {user ? (
+              <HeaderAccount displayName={user.displayName} />
+            ) : accountUnavailable ? (
+              <span className="text-sm text-slate-500" role="status">계정 서버 연결 안 됨</span>
+            ) : null}
           </div>
         </header>
         <main id="main-content" className="shell main-shell">

@@ -22,6 +22,16 @@ describe("client API requests", () => {
     expect(request.mock.calls[0]?.[1]?.signal).toBe(timeoutSignal);
   });
 
+  it("allows long-running operations to choose a longer timeout", async () => {
+    const timeoutSignal = new AbortController().signal;
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutSignal);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
+
+    await clientApi<void>("/photos/photo-1/complete", { method: "POST" }, 120_000);
+
+    expect(timeout).toHaveBeenCalledWith(120_000);
+  });
+
   it("lets a caller abort an in-flight request", async () => {
     const caller = new AbortController();
     vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => new Promise((_resolve, reject) => {

@@ -31,9 +31,10 @@ export default async function CalendarPage({
   const month = query.month ?? currentAlbumMonth();
   const filter = parsePhotoFilter(query);
   const apiQuery = photoFilterApiParams(filter, { month });
+  const returnTo = `/families/${familyId}/albums/${albumId}/calendar?${photoFilterPageParams(filter, { month })}`;
   const [days, families] = await Promise.all([
-    protectedApi<CalendarDay[]>(`/albums/${albumId}/calendar?${apiQuery}`),
-    protectedApi<Family[]>("/families")
+    protectedApi<CalendarDay[]>(`/albums/${albumId}/calendar?${apiQuery}`, returnTo),
+    protectedApi<Family[]>("/families", returnTo)
   ]);
   const family = families.find((item) => item.id === familyId);
   const album = family?.albums.find((item) => item.id === albumId);

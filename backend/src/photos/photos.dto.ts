@@ -20,7 +20,7 @@ export class StartUploadDto {
   @Length(1, 200)
   originalName!: string;
 
-  @IsIn(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"])
+  @IsIn(["image/jpeg", "image/png", "image/webp"])
   contentType!: string;
 
   @IsInt()

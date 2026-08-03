@@ -15,13 +15,6 @@ export class CreateAlbumDto {
   childNames!: string[];
 }
 
-export class UpdateAlbumDto {
-  @IsString()
-  @Length(1, 60)
-  @Matches(/\S/)
-  name!: string;
-}
-
 export class CreateChildTagDto {
   @IsString()
   @Length(1, 40)

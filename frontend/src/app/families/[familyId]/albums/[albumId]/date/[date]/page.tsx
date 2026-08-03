@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { ArrowLeft, ImagePlus } from "lucide-react";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ChildTagFilter } from "@/components/child-tag-filter";
 import { PhotoGallery } from "@/components/photo-gallery";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,7 @@ import {
   photoFilterKey,
   photoFilterPageParams
 } from "@/lib/photo-filter";
+import { currentUser } from "@/lib/current-user";
 import { protectedApi } from "@/lib/protected-api";
 import type { Family, Photo } from "@/lib/types";
 
@@ -28,11 +29,14 @@ export default async function DatePage({
   const { familyId, albumId, date } = await params;
   const filter = parsePhotoFilter(await searchParams);
   const apiQuery = photoFilterApiParams(filter, { date });
-  const [photos, families, session] = await Promise.all([
-    protectedApi<Photo[]>(`/albums/${albumId}/photos?${apiQuery}`),
-    protectedApi<Family[]>("/families"),
-    protectedApi<{ user: { id: string } }>("/auth/me")
+  const pageQuery = photoFilterPageParams(filter).toString();
+  const returnTo = `/families/${familyId}/albums/${albumId}/date/${date}${pageQuery ? `?${pageQuery}` : ""}`;
+  const [photos, families, user] = await Promise.all([
+    protectedApi<Photo[]>(`/albums/${albumId}/photos?${apiQuery}`, returnTo),
+    protectedApi<Family[]>("/families", returnTo),
+    currentUser()
   ]);
+  if (!user) redirect(`/login?returnTo=${encodeURIComponent(returnTo)}`);
   const family = families.find((item) => item.id === familyId);
   const album = family?.albums.find((item) => item.id === albumId);
   if (!family || !album) notFound();
@@ -90,7 +94,7 @@ export default async function DatePage({
       <PhotoGallery
         key={photoFilterKey(filter)}
         photos={photos}
-        currentUserId={session.user.id}
+        currentUserId={user.id}
         canDeleteAll={family.members[0]?.role === "OWNER"}
         uploadHref={uploadHref}
         emptyTitle={filterLabel ? `${filterLabel} 사진이 아직 없습니다` : undefined}

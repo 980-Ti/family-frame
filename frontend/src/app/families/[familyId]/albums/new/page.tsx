@@ -12,8 +12,10 @@ export default async function NewAlbumPage({
   params: Promise<{ familyId: string }>;
 }) {
   const { familyId } = await params;
-  const families = await protectedApi<Family[]>("/families");
-  if (!families.some((family) => family.id === familyId)) notFound();
+  const returnTo = `/families/${familyId}/albums/new`;
+  const families = await protectedApi<Family[]>("/families", returnTo);
+  const family = families.find((item) => item.id === familyId);
+  if (!family || family.members[0]?.role !== "OWNER") notFound();
 
   return (
     <section className="mx-auto max-w-2xl">

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -35,18 +35,26 @@ export function AlbumSettings({
   isOwner: boolean;
 }) {
   const router = useRouter();
+  const tagPendingRef = useRef(false);
+  const invitePendingRef = useRef(false);
   const [tagError, setTagError] = useState("");
+  const [tagPending, setTagPending] = useState(false);
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
   const [removedTagIds, setRemovedTagIds] = useState<string[]>([]);
   const [inviteError, setInviteError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
+  const [invitePending, setInvitePending] = useState(false);
   const visibleChildTags = childTags.filter((tag) => !removedTagIds.includes(tag.id));
+  const childTagLimitReached = visibleChildTags.length >= 10;
 
   async function createChildTag(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (tagPendingRef.current) return;
+    tagPendingRef.current = true;
     const form = event.currentTarget;
     const data = new FormData(form);
     setTagError("");
+    setTagPending(true);
 
     try {
       await clientApi(`/albums/${albumId}/child-tags`, {
@@ -57,14 +65,20 @@ export function AlbumSettings({
       router.refresh();
     } catch (reason) {
       setTagError(reason instanceof Error ? reason.message : "아이 이름을 추가하지 못했습니다.");
+    } finally {
+      tagPendingRef.current = false;
+      setTagPending(false);
     }
   }
 
   async function createInvite(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (invitePendingRef.current) return;
+    invitePendingRef.current = true;
     const form = event.currentTarget;
     const data = new FormData(form);
     setInviteError("");
+    setInvitePending(true);
 
     try {
       const result = await clientApi<{ token: string }>(`/families/${familyId}/invites`, {
@@ -75,6 +89,9 @@ export function AlbumSettings({
       form.reset();
     } catch (reason) {
       setInviteError(reason instanceof Error ? reason.message : "초대 링크를 만들지 못했습니다.");
+    } finally {
+      invitePendingRef.current = false;
+      setInvitePending(false);
     }
   }
 
@@ -153,9 +170,15 @@ export function AlbumSettings({
             aria-label="추가할 아이 이름"
             autoComplete="off"
             required
+            disabled={tagPending || childTagLimitReached}
           />
-          <Button className="shrink-0" type="submit">아이 추가</Button>
+          <Button className="shrink-0" type="submit" disabled={tagPending || childTagLimitReached}>
+            {tagPending ? "추가 중…" : "아이 추가"}
+          </Button>
         </form>
+        {childTagLimitReached ? (
+          <p className="muted mt-2 text-sm">아이 이름은 최대 10개까지 추가할 수 있어요.</p>
+        ) : null}
         {tagError ? (
           <Alert variant="destructive" className="mt-3" role="alert" aria-live="polite">
             <AlertDescription>{tagError}</AlertDescription>
@@ -177,8 +200,11 @@ export function AlbumSettings({
             autoComplete="email"
             spellCheck={false}
             required
+            disabled={invitePending}
           />
-          <Button className="shrink-0" type="submit">초대 링크 만들기</Button>
+          <Button className="shrink-0" type="submit" disabled={invitePending}>
+            {invitePending ? "만드는 중…" : "초대 링크 만들기"}
+          </Button>
         </div>
         {inviteLink && (
           <Alert className="mt-5 border-primary/20 bg-primary/5" aria-live="polite">

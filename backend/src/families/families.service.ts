@@ -55,17 +55,32 @@ export class FamiliesService {
 
   async invite(userId: string, familyId: string, email: string) {
     await this.requireMembership(userId, familyId, "OWNER");
+    const normalizedEmail = email.trim().toLowerCase();
     const token = randomBytes(32).toString("base64url");
-    await this.prisma.familyInvite.create({
-      data: {
-        familyId,
-        createdById: userId,
-        email: email.trim().toLowerCase(),
-        tokenHash: this.tokenHash(token),
-        expiresAt: new Date(Date.now() + 7 * 86_400_000)
+    const expiresAt = new Date(Date.now() + 7 * 86_400_000);
+    await this.prisma.$transaction(async (tx) => {
+      const lockKey = `invite:${familyId}:${normalizedEmail}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const existingMember = await tx.familyMember.findFirst({
+        where: { familyId, user: { email: normalizedEmail } }
+      });
+      if (existingMember) {
+        throw new ConflictException({ code: "MEMBER_ALREADY_JOINED", message: "이미 가족에 참여한 계정입니다." });
       }
+      await tx.familyInvite.deleteMany({
+        where: { familyId, email: normalizedEmail, acceptedAt: null }
+      });
+      await tx.familyInvite.create({
+        data: {
+          familyId,
+          createdById: userId,
+          email: normalizedEmail,
+          tokenHash: this.tokenHash(token),
+          expiresAt
+        }
+      });
     });
-    return { token, expiresAt: new Date(Date.now() + 7 * 86_400_000) };
+    return { token, expiresAt };
   }
 
   async inviteInfo(token: string) {
@@ -83,14 +98,23 @@ export class FamiliesService {
     if (membership && membership.familyId !== invite.familyId) {
       throw new ConflictException({ code: "FAMILY_ALREADY_JOINED", message: "이미 다른 가족에 참여하고 있습니다." });
     }
-    await this.prisma.$transaction([
-      this.prisma.familyMember.upsert({
+    await this.prisma.$transaction(async (tx) => {
+      const lockKey = `invite:${invite.familyId}:${invite.email}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const currentInvite = await tx.familyInvite.findUnique({ where: { id: invite.id } });
+      if (!currentInvite || currentInvite.acceptedAt || currentInvite.expiresAt <= new Date()) {
+        throw new NotFoundException({ code: "INVITE_NOT_FOUND", message: "초대가 없거나 만료되었습니다." });
+      }
+      await tx.familyMember.upsert({
         where: { familyId_userId: { familyId: invite.familyId, userId } },
         update: {},
         create: { familyId: invite.familyId, userId, role: "MEMBER" }
-      }),
-      this.prisma.familyInvite.update({ where: { id: invite.id }, data: { acceptedAt: new Date() } })
-    ]).catch((error: unknown) => {
+      });
+      await tx.familyInvite.updateMany({
+        where: { familyId: invite.familyId, email: invite.email, acceptedAt: null },
+        data: { acceptedAt: new Date() }
+      });
+    }).catch((error: unknown) => {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
         throw new ConflictException({ code: "FAMILY_ALREADY_JOINED", message: "이미 다른 가족에 참여하고 있습니다." });
       }
@@ -101,12 +125,22 @@ export class FamiliesService {
 
   async removeMember(userId: string, familyId: string, memberId: string) {
     await this.requireMembership(userId, familyId, "OWNER");
-    const member = await this.prisma.familyMember.findFirst({ where: { id: memberId, familyId } });
+    const member = await this.prisma.familyMember.findFirst({
+      where: { id: memberId, familyId },
+      include: { user: { select: { email: true } } }
+    });
     if (!member) throw new NotFoundException({ code: "MEMBER_NOT_FOUND", message: "구성원을 찾을 수 없습니다." });
     if (member.role === "OWNER") {
       throw new BadRequestException({ code: "OWNER_CANNOT_BE_REMOVED", message: "가족 대표는 내보낼 수 없습니다." });
     }
-    await this.prisma.familyMember.delete({ where: { id: member.id } });
+    await this.prisma.$transaction(async (tx) => {
+      const lockKey = `invite:${familyId}:${member.user.email}`;
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      await tx.familyMember.deleteMany({ where: { id: member.id, familyId } });
+      await tx.familyInvite.deleteMany({
+        where: { familyId, email: member.user.email, acceptedAt: null }
+      });
+    });
     return { ok: true };
   }
 

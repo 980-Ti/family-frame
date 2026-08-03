@@ -32,8 +32,11 @@ afterEach(() => {
 });
 
 describe("authentication navigation", () => {
-  it("submits the login form and reloads the authenticated app", async () => {
-    await act(async () => root.render(createElement(AuthForm, { mode: "login" })));
+  it("returns to an invitation after login", async () => {
+    await act(async () => root.render(createElement(AuthForm, {
+      mode: "login",
+      returnTo: "/invite/invite-token"
+    })));
     const email = container.querySelector<HTMLInputElement>('input[name="email"]')!;
     const password = container.querySelector<HTMLInputElement>('input[name="password"]')!;
     email.value = "user@example.com";
@@ -44,6 +47,6 @@ describe("authentication navigation", () => {
     });
 
     expect(clientApiMock).toHaveBeenCalledWith("/auth/login", expect.objectContaining({ method: "POST" }));
-    expect(replaceDocumentMock).toHaveBeenCalledWith("/families");
+    expect(replaceDocumentMock).toHaveBeenCalledWith("/invite/invite-token");
   });
 });

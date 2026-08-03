@@ -31,6 +31,7 @@ export function AlbumBrowserHeader({
 }) {
   const calendarQuery = photoFilterPageParams(filter, { month }).toString();
   const photosQuery = photoFilterPageParams(filter).toString();
+  const isOwner = family.members[0]?.role === "OWNER";
 
   return (
     <div className="album-hero">
@@ -65,18 +66,26 @@ export function AlbumBrowserHeader({
                   </Link>
                 </DropdownMenuItem>
               ))}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem asChild>
-                <Link href={`/families/${family.id}/albums/new`}>
-                  <Plus aria-hidden="true" />
-                  새 앨범
-                </Link>
-              </DropdownMenuItem>
+              {isOwner ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem asChild>
+                    <Link href={`/families/${family.id}/albums/new`}>
+                      <Plus aria-hidden="true" />
+                      새 앨범
+                    </Link>
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
         {!album.childTags.length ? (
-          <p className="muted mt-2 text-sm">앨범 설정에서 아이 이름을 추가할 수 있어요.</p>
+          <p className="muted mt-2 text-sm">
+            {isOwner
+              ? "앨범 설정에서 아이 이름을 추가할 수 있어요."
+              : "앨범을 만든 사람이 아이 이름을 추가할 수 있어요."}
+          </p>
         ) : null}
       </div>
 
@@ -103,12 +112,14 @@ export function AlbumBrowserHeader({
             </Link>
           </Button>
         </nav>
-        <Button asChild variant="outline" size="sm">
-          <Link href={`/families/${family.id}/albums/${album.id}/settings`}>
-            <Settings aria-hidden="true" />
-            앨범 설정
-          </Link>
-        </Button>
+        {isOwner ? (
+          <Button asChild variant="outline" size="sm">
+            <Link href={`/families/${family.id}/albums/${album.id}/settings`}>
+              <Settings aria-hidden="true" />
+              앨범 설정
+            </Link>
+          </Button>
+        ) : null}
         <Button asChild size="sm">
           <Link href={`/families/${family.id}/albums/${album.id}/upload`}>
             <Upload aria-hidden="true" />

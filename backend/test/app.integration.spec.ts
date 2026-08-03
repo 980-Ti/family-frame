@@ -36,7 +36,7 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
   });
 
   afterAll(async () => {
-    if (familyId) {
+    if (familyId && prisma && storage) {
       const assets = await prisma.mediaAsset.findMany({
         where: { familyId },
         select: { originalKey: true, displayKey: true, thumbnailKey: true }
@@ -50,8 +50,8 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
       );
       await prisma.family.deleteMany({ where: { id: familyId } });
     }
-    if (userId) await prisma.user.deleteMany({ where: { id: userId } });
-    await app.close();
+    if (userId && prisma) await prisma.user.deleteMany({ where: { id: userId } });
+    if (app) await app.close();
   });
 
   it("migrates, authenticates, uploads, transforms, lists, and downloads a private photo", async () => {

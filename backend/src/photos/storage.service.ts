@@ -11,6 +11,7 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../common/env.js";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const STORAGE_REQUEST_TIMEOUT_MS = 30_000;
 
 export class StorageObjectError extends Error {
   constructor(readonly code: "FILE_TOO_LARGE" | "EMPTY_OBJECT") {
@@ -58,10 +59,17 @@ export class StorageService {
   }
 
   async read(key: string): Promise<{ bytes: Buffer; contentType?: string }> {
-    const head = await this.client.send(new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }));
+    const abortSignal = AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS);
+    const head = await this.client.send(
+      new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      { abortSignal }
+    );
     if ((head.ContentLength ?? 0) > MAX_UPLOAD_BYTES) throw new StorageObjectError("FILE_TOO_LARGE");
     if (head.ContentLength === 0) throw new StorageObjectError("EMPTY_OBJECT");
-    const response = await this.client.send(new GetObjectCommand({ Bucket: this.config.bucket, Key: key }));
+    const response = await this.client.send(
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      { abortSignal }
+    );
     if (!response.Body) throw new StorageObjectError("EMPTY_OBJECT");
     const body = response.Body as AsyncIterable<Uint8Array> & { destroy?: () => void };
     const chunks: Buffer[] = [];
@@ -79,14 +87,23 @@ export class StorageService {
   }
 
   put(key: string, body: Buffer, contentType: string) {
-    return this.client.send(new PutObjectCommand({ Bucket: this.config.bucket, Key: key, Body: body, ContentType: contentType }));
+    return this.client.send(
+      new PutObjectCommand({ Bucket: this.config.bucket, Key: key, Body: body, ContentType: contentType }),
+      { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
+    );
   }
 
   delete(key: string) {
-    return this.client.send(new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }));
+    return this.client.send(
+      new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
+    );
   }
 
   async check(): Promise<void> {
-    await this.client.send(new HeadBucketCommand({ Bucket: this.config.bucket }));
+    await this.client.send(
+      new HeadBucketCommand({ Bucket: this.config.bucket }),
+      { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
+    );
   }
 }

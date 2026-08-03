@@ -1,6 +1,6 @@
-export async function clientApi<T>(path: string, init?: RequestInit): Promise<T> {
+export async function clientApi<T>(path: string, init?: RequestInit, timeoutMs = 15_000): Promise<T> {
   let response: Response;
-  const timeoutSignal = AbortSignal.timeout(15_000);
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const signal = init?.signal
     ? AbortSignal.any([init.signal, timeoutSignal])
     : timeoutSignal;

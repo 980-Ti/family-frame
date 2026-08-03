@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clientApi } from "@/lib/api";
 import { replaceDocument } from "@/lib/document-navigation";
+import { safeReturnTo } from "@/lib/return-to";
 
 type AuthCredentials = {
   email: FormDataEntryValue | null;
@@ -17,15 +18,21 @@ type AuthCredentials = {
 
 export async function authenticateAndRedirect(
   mode: "login" | "signup",
-  credentials: AuthCredentials
+  credentials: AuthCredentials,
+  returnTo?: string
 ): Promise<void> {
   await clientApi(`/auth/${mode}`, { method: "POST", body: JSON.stringify(credentials) });
-  replaceDocument("/families");
+  replaceDocument(safeReturnTo(returnTo));
 }
 
-export function AuthForm({ mode }: { mode: "login" | "signup" }) {
+export function AuthForm({ mode, returnTo }: { mode: "login" | "signup"; returnTo?: string }) {
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
+  const destination = safeReturnTo(returnTo);
+  const alternatePath = mode === "login" ? "/signup" : "/login";
+  const alternateHref = destination === "/families"
+    ? alternatePath
+    : `${alternatePath}?returnTo=${encodeURIComponent(destination)}`;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,7 +44,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
         email: form.get("email"),
         password: form.get("password"),
         ...(mode === "signup" ? { displayName: form.get("displayName") } : {})
-      });
+      }, destination);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "오류가 발생했습니다.");
     } finally {
@@ -100,7 +107,7 @@ export function AuthForm({ mode }: { mode: "login" | "signup" }) {
           </form>
           <p className="muted mt-7 text-center text-[15px]">
             {mode === "login" ? "아직 계정이 없나요? " : "이미 계정이 있나요? "}
-            <Link className="inline-flex min-h-11 items-center px-1 font-bold text-[var(--accent)] underline-offset-4 hover:underline" href={mode === "login" ? "/signup" : "/login"}>
+            <Link className="inline-flex min-h-11 items-center px-1 font-bold text-[var(--accent)] underline-offset-4 hover:underline" href={alternateHref}>
               {mode === "login" ? "가입하기" : "로그인"}
             </Link>
           </p>

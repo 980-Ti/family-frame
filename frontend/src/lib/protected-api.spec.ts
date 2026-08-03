@@ -33,6 +33,18 @@ describe("protected page API requests", () => {
     expect(redirectMock).toHaveBeenCalledWith("/login");
   });
 
+  it("preserves a safe protected-page destination when the session expires", async () => {
+    serverApiMock.mockRejectedValue(new ServerApiError(401));
+
+    await expect(protectedApi(
+      "/albums/album-1/calendar",
+      "/families/family-1/albums/album-1/calendar?month=2026-08"
+    )).rejects.toThrow("REDIRECT");
+    expect(redirectMock).toHaveBeenCalledWith(
+      "/login?returnTo=%2Ffamilies%2Ffamily-1%2Falbums%2Falbum-1%2Fcalendar%3Fmonth%3D2026-08"
+    );
+  });
+
   it("renders not found for a missing protected resource", async () => {
     serverApiMock.mockRejectedValue(new ServerApiError(404));
 

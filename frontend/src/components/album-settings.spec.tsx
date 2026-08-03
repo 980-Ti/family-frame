@@ -33,4 +33,22 @@ describe("album child tag settings", () => {
     expect(markup).toContain("아직 추가한 아이 이름이 없어요.");
     expect(markup).toContain("아이 추가");
   });
+
+  it("disables the add form when the album has ten child tags", () => {
+    const markup = renderToStaticMarkup(
+      <AlbumSettings
+        familyId="family-1"
+        albumId="album-1"
+        childTags={Array.from({ length: 10 }, (_, index) => ({
+          id: `tag-${index}`,
+          albumId: "album-1",
+          name: `아이 ${index + 1}`
+        }))}
+        isOwner
+      />
+    );
+
+    expect(markup).toContain("아이 이름은 최대 10개까지 추가할 수 있어요.");
+    expect(markup).toContain('aria-label="추가할 아이 이름" autoComplete="off" required="" disabled=""');
+  });
 });

@@ -63,7 +63,17 @@ export class AlbumsService {
     if (!normalizedName) {
       throw new BadRequestException({ code: "INVALID_CHILD_TAG", message: "아이 이름을 입력해주세요." });
     }
-    return this.prisma.childTag.create({ data: { albumId, name: normalizedName } }).catch((error: unknown) => {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`child-tags:${albumId}`}))`;
+      const count = await tx.childTag.count({ where: { albumId } });
+      if (count >= 10) {
+        throw new ConflictException({
+          code: "CHILD_TAG_LIMIT",
+          message: "아이 이름은 앨범마다 최대 10개까지 추가할 수 있습니다."
+        });
+      }
+      return tx.childTag.create({ data: { albumId, name: normalizedName } });
+    }).catch((error: unknown) => {
       if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
         throw new ConflictException({ code: "CHILD_TAG_EXISTS", message: "이미 등록된 아이 이름입니다." });
       }
