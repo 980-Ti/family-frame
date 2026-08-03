@@ -1,0 +1,101 @@
+import Link from "next/link";
+import { ArrowLeft, ImagePlus } from "lucide-react";
+import { notFound } from "next/navigation";
+import { ChildTagFilter } from "@/components/child-tag-filter";
+import { PhotoGallery } from "@/components/photo-gallery";
+import { Button } from "@/components/ui/button";
+import {
+  parsePhotoFilter,
+  photoFilterApiParams,
+  photoFilterKey,
+  photoFilterPageParams
+} from "@/lib/photo-filter";
+import { protectedApi } from "@/lib/protected-api";
+import type { Family, Photo } from "@/lib/types";
+
+export default async function DatePage({
+  params,
+  searchParams
+}: {
+  params: Promise<{ familyId: string; albumId: string; date: string }>;
+  searchParams: Promise<{
+    tag?: string;
+    tags?: string;
+    match?: string;
+    untagged?: string;
+  }>;
+}) {
+  const { familyId, albumId, date } = await params;
+  const filter = parsePhotoFilter(await searchParams);
+  const apiQuery = photoFilterApiParams(filter, { date });
+  const [photos, families, session] = await Promise.all([
+    protectedApi<Photo[]>(`/albums/${albumId}/photos?${apiQuery}`),
+    protectedApi<Family[]>("/families"),
+    protectedApi<{ user: { id: string } }>("/auth/me")
+  ]);
+  const family = families.find((item) => item.id === familyId);
+  const album = family?.albums.find((item) => item.id === albumId);
+  if (!family || !album) notFound();
+  const selectedNames = album.childTags
+    .filter((tag) => filter.childTagIds.includes(tag.id))
+    .map((tag) => tag.name);
+  const filterLabel = filter.untagged
+    ? "태그 없는"
+    : selectedNames.length > 1
+      ? filter.match === "all"
+        ? `${selectedNames.join("·")}가 함께 나온`
+        : `${selectedNames.join("·")} 중 한 명이라도 나온`
+      : selectedNames[0];
+  const month = date.slice(0, 7);
+  const uploadHref = `/families/${familyId}/albums/${albumId}/upload?date=${date}`;
+  const calendarParams = photoFilterPageParams(filter, { month });
+  const dateValue = new Date(`${date}T00:00:00+09:00`);
+  const yearLabel = new Intl.DateTimeFormat("ko-KR", { year: "numeric" }).format(dateValue);
+  const dateLabel = new Intl.DateTimeFormat("ko-KR", {
+    month: "long",
+    day: "numeric"
+  }).format(dateValue);
+  const weekdayLabel = new Intl.DateTimeFormat("ko-KR", { weekday: "long" }).format(dateValue);
+  return (
+    <section>
+      <div className="date-page-header">
+        <div>
+          <Button asChild variant="link" className="page-back">
+            <Link href={`/families/${familyId}/albums/${albumId}/calendar?${calendarParams}`}>
+              <ArrowLeft aria-hidden="true" />
+              달력으로 돌아가기
+            </Link>
+          </Button>
+          <p className="date-year">{yearLabel}</p>
+          <div className="date-title-row">
+            <h1 className="brand text-4xl font-extrabold sm:text-5xl">
+              <time dateTime={date}>{dateLabel}</time>
+            </h1>
+            <span className="weekday-badge">{weekdayLabel}</span>
+          </div>
+          <p className="date-photo-count">{filterLabel ? `${filterLabel} 사진 ` : "사진 "}<strong>{photos.length}장</strong></p>
+        </div>
+        <Button asChild>
+          <Link href={uploadHref}>
+            <ImagePlus aria-hidden="true" />
+            사진 추가
+          </Link>
+        </Button>
+      </div>
+      <ChildTagFilter
+        baseHref={`/families/${familyId}/albums/${albumId}/date/${date}`}
+        childTags={album.childTags}
+        filter={filter}
+      />
+      <PhotoGallery
+        key={photoFilterKey(filter)}
+        photos={photos}
+        currentUserId={session.user.id}
+        canDeleteAll={family.members[0]?.role === "OWNER"}
+        uploadHref={uploadHref}
+        emptyTitle={filterLabel ? `${filterLabel} 사진이 아직 없습니다` : undefined}
+        emptyDescription={filterLabel ? "다른 필터를 선택하거나 새 사진을 추가해 보세요." : undefined}
+      />
+    </section>
+  );
+}

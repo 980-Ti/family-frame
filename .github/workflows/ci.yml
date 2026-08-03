@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      CI: "true"
+      DATABASE_URL: postgresql://family_frame:local_password@localhost:5432/family_frame
+      NEXT_TELEMETRY_DISABLED: "1"
+      S3_ENDPOINT: http://localhost:9000
+      S3_REGION: us-east-1
+      S3_BUCKET: family-frame
+      S3_ACCESS_KEY_ID: minio
+      S3_SECRET_ACCESS_KEY: minio_password
+      S3_FORCE_PATH_STYLE: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Validate orchestration files
+        run: |
+          node --check scripts/dev.mjs
+          docker compose config --quiet
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm lint
+      - run: pnpm typecheck
+      - run: pnpm test
+      - name: Start integration services
+        run: |
+          docker compose up -d --wait postgres minio
+          docker compose run --rm minio-init
+      - name: Validate single-family migration preflight
+        run: docker compose exec -T postgres psql -U family_frame -d family_frame -v ON_ERROR_STOP=1 < deploy/k8s/preflight-single-family.sql
+      - run: pnpm db:migrate:deploy
+      - name: Run PostgreSQL and MinIO integration smoke
+        env:
+          RUN_INTEGRATION: "1"
+        run: pnpm --filter ./backend exec vitest run test/app.integration.spec.ts
+      - run: pnpm build
+      - name: Stop integration services
+        if: always()
+        run: docker compose down -v

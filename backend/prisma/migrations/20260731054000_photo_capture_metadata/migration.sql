@@ -1,0 +1,11 @@
+CREATE TYPE "PhotoDateSource" AS ENUM (
+  'EXIF_ORIGINAL',
+  'EXIF_CREATED',
+  'FILE_MODIFIED',
+  'USER',
+  'DEFAULT'
+);
+
+ALTER TABLE "Photo"
+ADD COLUMN "capturedAt" TIMESTAMP(3),
+ADD COLUMN "dateSource" "PhotoDateSource" NOT NULL DEFAULT 'USER';

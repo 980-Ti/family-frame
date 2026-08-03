@@ -1,0 +1,35 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  generateName: family-frame-migrate-
+  namespace: family-frame
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: ghcr.io/replace-me/family-frame-backend:RELEASE_SHA
+          imagePullPolicy: Always
+          command: ["node", "node_modules/prisma/build/index.js", "migrate", "deploy"]
+          envFrom:
+            - configMapRef:
+                name: family-frame-config
+            - secretRef:
+                name: family-frame-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault

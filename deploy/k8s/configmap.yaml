@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: family-frame-config
+  namespace: family-frame
+data:
+  APP_ORIGIN: https://family-frame.example.com
+  API_ORIGIN: http://family-frame-backend:4000
+  SESSION_COOKIE_NAME: family_frame_session
+  SESSION_TTL_DAYS: "7"
+  S3_ENDPOINT: https://rgw.example.com
+  S3_REGION: us-east-1
+  S3_BUCKET: family-frame
+  S3_FORCE_PATH_STYLE: "true"
+  SIGNED_URL_TTL_SECONDS: "300"
