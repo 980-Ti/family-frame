@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { PrivateImage } from "./private-image";
 import {
-  photoFilterPageParams,
-  type PhotoFilterState
-} from "@/lib/photo-filter";
+  mediaFilterPageParams,
+  type MediaFilterState
+} from "@/lib/media-filter";
 import type { CalendarDay } from "@/lib/types";
 
 const weekday = ["일", "월", "화", "수", "목", "금", "토"];
@@ -19,7 +19,7 @@ export function MonthCalendar({
   albumId: string;
   month: string;
   days: CalendarDay[];
-  filter: PhotoFilterState;
+  filter: MediaFilterState;
 }) {
   const [year, monthNumber] = month.split("-").map(Number);
   const firstWeekday = new Date(Date.UTC(year, monthNumber - 1, 1)).getUTCDay();
@@ -31,7 +31,7 @@ export function MonthCalendar({
     const date = `${month}-${String(day).padStart(2, "0")}`;
     return { day, date, data: byDate.get(date) };
   });
-  const filterQuery = photoFilterPageParams(filter).toString();
+  const filterQuery = mediaFilterPageParams(filter).toString();
 
   return (
     <>
@@ -42,16 +42,16 @@ export function MonthCalendar({
         {cells.map((cell, index) => cell ? (
           <Link
             key={cell.date}
-            className={`day ${cell.data ? "has-photo" : ""}`}
+            className={`day ${cell.data ? "has-media" : ""}`}
             data-weekday={index % 7}
             href={`/families/${familyId}/albums/${albumId}/date/${cell.date}${filterQuery ? `?${filterQuery}` : ""}`}
-            aria-label={`${cell.date}, 사진 ${cell.data?.count ?? 0}장`}
+            aria-label={`${cell.date}, 사진과 영상 ${cell.data?.count ?? 0}개`}
           >
-            {cell.data?.representativePhotoId && (
-              <PrivateImage photoId={cell.data.representativePhotoId} alt="" className="absolute inset-0 h-full w-full object-cover" />
+            {cell.data?.representativeMediaId && (
+              <PrivateImage mediaId={cell.data.representativeMediaId} alt="" className="absolute inset-0 h-full w-full object-cover" />
             )}
             <span className="day-number">{cell.day}</span>
-            {cell.data && <span className="day-count">{cell.data.count}장</span>}
+            {cell.data && <span className="day-count">{cell.data.count}개</span>}
           </Link>
         ) : <div key={`empty-${index}`} />)}
       </div>

@@ -10,8 +10,10 @@ import {
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../common/env.js";
 
-const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
+const MAX_VIDEO_UPLOAD_BYTES = 200 * 1024 * 1024;
 const STORAGE_REQUEST_TIMEOUT_MS = 30_000;
+const VIDEO_TRANSFER_TIMEOUT_MS = 5 * 60_000;
 
 export class StorageObjectError extends Error {
   constructor(readonly code: "FILE_TOO_LARGE" | "EMPTY_OBJECT") {
@@ -59,16 +61,22 @@ export class StorageService {
   }
 
   async read(key: string): Promise<{ bytes: Buffer; contentType?: string }> {
-    const abortSignal = AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS);
     const head = await this.client.send(
       new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }),
-      { abortSignal }
+      { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
     );
-    if ((head.ContentLength ?? 0) > MAX_UPLOAD_BYTES) throw new StorageObjectError("FILE_TOO_LARGE");
+    const maxUploadBytes = head.ContentType === "video/mp4"
+      ? MAX_VIDEO_UPLOAD_BYTES
+      : MAX_IMAGE_UPLOAD_BYTES;
+    if ((head.ContentLength ?? 0) > maxUploadBytes) throw new StorageObjectError("FILE_TOO_LARGE");
     if (head.ContentLength === 0) throw new StorageObjectError("EMPTY_OBJECT");
     const response = await this.client.send(
       new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
-      { abortSignal }
+      {
+        abortSignal: AbortSignal.timeout(
+          head.ContentType === "video/mp4" ? VIDEO_TRANSFER_TIMEOUT_MS : STORAGE_REQUEST_TIMEOUT_MS
+        )
+      }
     );
     if (!response.Body) throw new StorageObjectError("EMPTY_OBJECT");
     const body = response.Body as AsyncIterable<Uint8Array> & { destroy?: () => void };
@@ -76,7 +84,7 @@ export class StorageService {
     let size = 0;
     for await (const chunk of body) {
       size += chunk.byteLength;
-      if (size > MAX_UPLOAD_BYTES) {
+      if (size > maxUploadBytes) {
         body.destroy?.();
         throw new StorageObjectError("FILE_TOO_LARGE");
       }
@@ -89,7 +97,11 @@ export class StorageService {
   put(key: string, body: Buffer, contentType: string) {
     return this.client.send(
       new PutObjectCommand({ Bucket: this.config.bucket, Key: key, Body: body, ContentType: contentType }),
-      { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
+      {
+        abortSignal: AbortSignal.timeout(
+          contentType === "video/mp4" ? VIDEO_TRANSFER_TIMEOUT_MS : STORAGE_REQUEST_TIMEOUT_MS
+        )
+      }
     );
   }
 

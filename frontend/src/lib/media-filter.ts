@@ -1,4 +1,4 @@
-export type PhotoFilterState = {
+export type MediaFilterState = {
   childTagIds: string[];
   match: "any" | "all";
   untagged: boolean;
@@ -11,7 +11,7 @@ type FilterSearchParams = {
   untagged?: string;
 };
 
-export function parsePhotoFilter(params: FilterSearchParams): PhotoFilterState {
+export function parseMediaFilter(params: FilterSearchParams): MediaFilterState {
   const legacyTag = params.tag === "untagged" ? undefined : params.tag;
   const childTagIds = [...new Set([
     ...(params.tags?.split(",") ?? []),
@@ -26,8 +26,8 @@ export function parsePhotoFilter(params: FilterSearchParams): PhotoFilterState {
   };
 }
 
-export function photoFilterPageParams(
-  filter: PhotoFilterState,
+export function mediaFilterPageParams(
+  filter: MediaFilterState,
   initial?: Record<string, string>
 ) {
   const params = new URLSearchParams(initial);
@@ -47,8 +47,8 @@ export function photoFilterPageParams(
   return params;
 }
 
-export function photoFilterApiParams(
-  filter: PhotoFilterState,
+export function mediaFilterApiParams(
+  filter: MediaFilterState,
   initial?: Record<string, string>
 ) {
   const params = new URLSearchParams(initial);
@@ -63,7 +63,7 @@ export function photoFilterApiParams(
   return params;
 }
 
-export function photoFilterKey(filter: PhotoFilterState) {
+export function mediaFilterKey(filter: MediaFilterState) {
   return filter.untagged
     ? "untagged"
     : `${filter.match}:${filter.childTagIds.join(",") || "all"}`;

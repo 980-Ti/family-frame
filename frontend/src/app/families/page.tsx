@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { FamilyManager } from "@/components/family-manager";
-import { currentAlbumMonth } from "@/lib/photo-date";
+import { currentAlbumMonth } from "@/lib/media-date";
 import { protectedApi } from "@/lib/protected-api";
 import type { Family } from "@/lib/types";
 

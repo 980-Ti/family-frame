@@ -8,9 +8,9 @@ import { AlbumsService } from "../src/albums/albums.service.js";
 import { SessionGuard } from "../src/auth/session.guard.js";
 import { PrismaService } from "../src/common/prisma.service.js";
 import { FamiliesService } from "../src/families/families.service.js";
-import { PhotosController } from "../src/photos/photos.controller.js";
-import { PhotosService } from "../src/photos/photos.service.js";
-import { StorageService } from "../src/photos/storage.service.js";
+import { MediaController } from "../src/media/media.controller.js";
+import { MediaService } from "../src/media/media.service.js";
+import { StorageService } from "../src/media/storage.service.js";
 
 const tags = [
   { id: "tag-1", name: "민서" },
@@ -19,9 +19,9 @@ const tags = [
 
 async function createTestApp(
   validTagCount: number,
-  stalePhotos: { id: string; tempObjectKey: string | null }[] = []
+  staleMedia: { id: string; tempObjectKey: string | null }[] = []
 ) {
-  let activeCount = stalePhotos.length ? 10 : 0;
+  let activeCount = staleMedia.length ? 10 : 0;
   const deleteObject = vi.fn(async () => undefined);
   const prisma = {
     familyMember: {
@@ -35,12 +35,12 @@ async function createTestApp(
       childTag: {
         count: async () => validTagCount
       },
-      photo: {
+      media: {
         findUnique: async () => null,
-        findMany: async () => stalePhotos,
+        findMany: async () => staleMedia,
         updateMany: async () => {
-          activeCount -= stalePhotos.length;
-          return { count: stalePhotos.length };
+          activeCount -= staleMedia.length;
+          return { count: staleMedia.length };
         },
         count: async () => activeCount,
         create: async ({ data }: {
@@ -50,9 +50,9 @@ async function createTestApp(
             childTags?: { createMany: { data: { childTagId: string }[] } };
           }
         }) => ({
-          id: "photo-1",
+          id: "media-1",
           status: "PENDING_UPLOAD",
-          tempObjectKey: "temp/family-1/photo-1",
+          tempObjectKey: "temp/family-1/media-1",
           capturedAt: data.capturedAt ?? null,
           dateSource: data.dateSource ?? "USER",
           childTags: data.childTags?.createMany.data.map(({ childTagId }) => ({
@@ -64,9 +64,9 @@ async function createTestApp(
   };
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [PhotosController],
+    controllers: [MediaController],
     providers: [
-      PhotosService,
+      MediaService,
       AlbumsService,
       FamiliesService,
       { provide: PrismaService, useValue: prisma },
@@ -107,7 +107,7 @@ const uploadRequest = {
   clientUploadId: "1d3df46c-72dc-4d7b-9d51-3da82a4c61ce"
 };
 
-describe("photo child tag API", () => {
+describe("media child tag API", () => {
   let app: INestApplication | undefined;
 
   afterEach(async () => {
@@ -126,7 +126,7 @@ describe("photo child tag API", () => {
       .expect(201);
 
     expect(response.body).toMatchObject({
-      photoId: "photo-1",
+      mediaId: "media-1",
       childTags: [{ id: "tag-1", name: "민서" }, { id: "tag-2", name: "준서" }]
     });
   });
@@ -139,7 +139,7 @@ describe("photo child tag API", () => {
       .send(uploadRequest)
       .expect(201);
 
-    expect(response.body).toMatchObject({ photoId: "photo-1", childTags: [] });
+    expect(response.body).toMatchObject({ mediaId: "media-1", childTags: [] });
   });
 
   it("rejects a child tag from another album", async () => {
@@ -171,7 +171,7 @@ describe("photo child tag API", () => {
       .expect(201);
 
     expect(response.body).toMatchObject({
-      photoId: "photo-1",
+      mediaId: "media-1",
       capturedAt: "2026-07-28T06:30:00.000Z",
       dateSource: "EXIF_ORIGINAL"
     });
@@ -196,7 +196,7 @@ describe("photo child tag API", () => {
   });
 
   it("expires abandoned uploads before enforcing the daily limit", async () => {
-    app = await createTestApp(0, [{ id: "stale-photo", tempObjectKey: "temp/family-1/stale-photo" }]);
+    app = await createTestApp(0, [{ id: "stale-media", tempObjectKey: "temp/family-1/stale-media" }]);
 
     await request(app.getHttpServer())
       .post("/albums/album-1/uploads")
@@ -204,6 +204,6 @@ describe("photo child tag API", () => {
       .expect(201);
 
     expect((app as INestApplication & { deleteObject: ReturnType<typeof vi.fn> }).deleteObject)
-      .toHaveBeenCalledWith("temp/family-1/stale-photo");
+      .toHaveBeenCalledWith("temp/family-1/stale-media");
   });
 });

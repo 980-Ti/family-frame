@@ -9,18 +9,18 @@ import { AlbumsService } from "../src/albums/albums.service.js";
 import { SessionGuard } from "../src/auth/session.guard.js";
 import { PrismaService } from "../src/common/prisma.service.js";
 import { FamiliesService } from "../src/families/families.service.js";
-import { PhotosController } from "../src/photos/photos.controller.js";
-import { PhotosService } from "../src/photos/photos.service.js";
-import { StorageService } from "../src/photos/storage.service.js";
+import { MediaController } from "../src/media/media.controller.js";
+import { MediaService } from "../src/media/media.service.js";
+import { StorageService } from "../src/media/storage.service.js";
 
 const tags = {
   minseo: { id: "tag-1", albumId: "album-1", name: "민서" },
   junseo: { id: "tag-2", albumId: "album-1", name: "준서" }
 };
 
-const photos = [
+const mediaItems = [
   {
-    id: "photo-minseo",
+    id: "media-minseo",
     albumId: "album-1",
     albumDate: new Date("2026-07-02T00:00:00.000Z"),
     originalName: "minseo.jpg",
@@ -30,7 +30,7 @@ const photos = [
     childTags: [{ childTag: tags.minseo }]
   },
   {
-    id: "photo-junseo",
+    id: "media-junseo",
     albumId: "album-1",
     albumDate: new Date("2026-07-02T00:00:00.000Z"),
     originalName: "junseo.jpg",
@@ -40,7 +40,7 @@ const photos = [
     childTags: [{ childTag: tags.junseo }]
   },
   {
-    id: "photo-together",
+    id: "media-together",
     albumId: "album-1",
     albumDate: new Date("2026-07-02T00:00:00.000Z"),
     originalName: "together.jpg",
@@ -50,7 +50,7 @@ const photos = [
     childTags: [{ childTag: tags.minseo }, { childTag: tags.junseo }]
   },
   {
-    id: "photo-untagged",
+    id: "media-untagged",
     albumId: "album-1",
     albumDate: new Date("2026-07-02T00:00:00.000Z"),
     originalName: "family.jpg",
@@ -61,29 +61,29 @@ const photos = [
   }
 ];
 
-function filteredPhotos(where: {
+function filteredMedia(where: {
   albumDate?: Date | { gte: Date; lt: Date };
   childTags?: { some?: { childTagId: string | { in: string[] } }; none?: object };
   AND?: { childTags: { some: { childTagId: string } } }[];
 }) {
-  return photos.filter((photo) => {
+  return mediaItems.filter((media) => {
     const dateMatches = where.albumDate instanceof Date
-      ? photo.albumDate.valueOf() === where.albumDate.valueOf()
+      ? media.albumDate.valueOf() === where.albumDate.valueOf()
       : where.albumDate
-        ? photo.albumDate >= where.albumDate.gte && photo.albumDate < where.albumDate.lt
+        ? media.albumDate >= where.albumDate.gte && media.albumDate < where.albumDate.lt
         : true;
     const selectedTag = where.childTags?.some?.childTagId;
     const tagMatches = selectedTag
-      ? photo.childTags.some((item) =>
+      ? media.childTags.some((item) =>
           typeof selectedTag === "string"
             ? item.childTag.id === selectedTag
             : (selectedTag as { in: string[] }).in.includes(item.childTag.id)
         )
       : where.childTags?.none
-        ? photo.childTags.length === 0
+        ? media.childTags.length === 0
         : true;
     const allTagsMatch = where.AND?.every((condition) =>
-      photo.childTags.some((item) => item.childTag.id === condition.childTags.some.childTagId)
+      media.childTags.some((item) => item.childTag.id === condition.childTags.some.childTagId)
     ) ?? true;
     return dateMatches && tagMatches && allTagsMatch;
   });
@@ -105,16 +105,16 @@ async function createTestApp() {
         name: "우리의 여름"
       })
     },
-    photo: {
+    media: {
       findMany: async ({ where, select, orderBy, take, cursor, skip }: {
-        where: Parameters<typeof filteredPhotos>[0];
+        where: Parameters<typeof filteredMedia>[0];
         select?: { childTags?: unknown };
         orderBy?: { albumDate?: "asc" | "desc"; createdAt?: "asc" | "desc" }[];
         take?: number;
         cursor?: { id: string };
         skip?: number;
       }) => {
-        let rows = filteredPhotos(where);
+        let rows = filteredMedia(where);
         if (orderBy?.some((item) => item.albumDate || item.createdAt)) {
           rows = [...rows].sort((left, right) =>
             right.albumDate.valueOf() - left.albumDate.valueOf()
@@ -122,20 +122,20 @@ async function createTestApp() {
           );
         }
         if (cursor) {
-          rows = rows.slice(Math.max(0, rows.findIndex((photo) => photo.id === cursor.id)) + (skip ?? 0));
+          rows = rows.slice(Math.max(0, rows.findIndex((media) => media.id === cursor.id)) + (skip ?? 0));
         }
         if (take) rows = rows.slice(0, take);
-        return rows.map((photo) => ({
-          ...photo,
-          childTags: select?.childTags ? photo.childTags : undefined
+        return rows.map((media) => ({
+          ...media,
+          childTags: select?.childTags ? media.childTags : undefined
         }));
       },
       groupBy: async ({ where }: {
-        where: Parameters<typeof filteredPhotos>[0];
+        where: Parameters<typeof filteredMedia>[0];
       }) => {
         const counts = new Map<number, number>();
-        for (const photo of filteredPhotos(where)) {
-          counts.set(photo.albumDate.valueOf(), (counts.get(photo.albumDate.valueOf()) ?? 0) + 1);
+        for (const media of filteredMedia(where)) {
+          counts.set(media.albumDate.valueOf(), (counts.get(media.albumDate.valueOf()) ?? 0) + 1);
         }
         return [...counts].map(([timestamp, count]) => ({
           albumDate: new Date(timestamp),
@@ -146,16 +146,16 @@ async function createTestApp() {
     dailyRepresentative: {
       findMany: async () => [{
         albumDate: new Date("2026-07-02T00:00:00.000Z"),
-        photoId: "photo-junseo"
+        mediaId: "media-junseo"
       }]
     }
   };
 
   const moduleRef = await Test.createTestingModule({
-    controllers: [AlbumsController, PhotosController],
+    controllers: [AlbumsController, MediaController],
     providers: [
       AlbumsService,
-      PhotosService,
+      MediaService,
       FamiliesService,
       { provide: PrismaService, useValue: prisma },
       { provide: StorageService, useValue: {} }
@@ -180,37 +180,37 @@ async function createTestApp() {
   return app;
 }
 
-describe("photo child tag filters", () => {
+describe("media child tag filters", () => {
   let app: INestApplication | undefined;
 
   afterEach(async () => {
     await app?.close();
   });
 
-  it("lists only photos tagged with the selected child", async () => {
+  it("lists only mediaItems tagged with the selected child", async () => {
     app = await createTestApp();
 
     const response = await request(app.getHttpServer())
-      .get("/albums/album-1/photos?date=2026-07-02&childTagId=tag-1")
+      .get("/albums/album-1/media?date=2026-07-02&childTagId=tag-1")
       .expect(200);
 
-    expect(response.body.map((photo: { id: string }) => photo.id)).toEqual([
-      "photo-minseo",
-      "photo-together"
+    expect(response.body.map((media: { id: string }) => media.id)).toEqual([
+      "media-minseo",
+      "media-together"
     ]);
     expect(response.body[0]).toMatchObject({
       childTags: [{ id: "tag-1", name: "민서" }]
     });
   });
 
-  it("lists only photos without child tags", async () => {
+  it("lists only mediaItems without child tags", async () => {
     app = await createTestApp();
 
     const response = await request(app.getHttpServer())
-      .get("/albums/album-1/photos?date=2026-07-02&childTagId=untagged")
+      .get("/albums/album-1/media?date=2026-07-02&childTagId=untagged")
       .expect(200);
 
-    expect(response.body.map((photo: { id: string }) => photo.id)).toEqual(["photo-untagged"]);
+    expect(response.body.map((media: { id: string }) => media.id)).toEqual(["media-untagged"]);
   });
 
   it("uses matching counts and representatives in a filtered calendar", async () => {
@@ -223,7 +223,7 @@ describe("photo child tag filters", () => {
     expect(response.body).toEqual([{
       date: "2026-07-02",
       count: 2,
-      representativePhotoId: "photo-minseo"
+      representativeMediaId: "media-minseo"
     }]);
   });
 
@@ -231,13 +231,13 @@ describe("photo child tag filters", () => {
     app = await createTestApp();
 
     const response = await request(app.getHttpServer())
-      .get("/albums/album-1/photos?date=2026-07-02&childTagIds=tag-1,tag-2")
+      .get("/albums/album-1/media?date=2026-07-02&childTagIds=tag-1,tag-2")
       .expect(200);
 
-    expect(response.body.map((photo: { id: string }) => photo.id)).toEqual([
-      "photo-junseo",
-      "photo-minseo",
-      "photo-together"
+    expect(response.body.map((media: { id: string }) => media.id)).toEqual([
+      "media-junseo",
+      "media-minseo",
+      "media-together"
     ]);
   });
 
@@ -245,27 +245,27 @@ describe("photo child tag filters", () => {
     app = await createTestApp();
 
     const response = await request(app.getHttpServer())
-      .get("/albums/album-1/photos?date=2026-07-02&childTagIds=tag-1,tag-2&match=all")
+      .get("/albums/album-1/media?date=2026-07-02&childTagIds=tag-1,tag-2&match=all")
       .expect(200);
 
-    expect(response.body.map((photo: { id: string }) => photo.id)).toEqual(["photo-together"]);
+    expect(response.body.map((media: { id: string }) => media.id)).toEqual(["media-together"]);
   });
 
-  it("paginates a filtered album-wide photo feed", async () => {
+  it("paginates a filtered album-wide media feed", async () => {
     app = await createTestApp();
 
     const first = await request(app.getHttpServer())
-      .get("/albums/album-1/photo-feed?childTagIds=tag-1&take=1")
+      .get("/albums/album-1/media-feed?childTagIds=tag-1&take=1")
       .expect(200);
 
-    expect(first.body.items.map((photo: { id: string }) => photo.id)).toEqual(["photo-minseo"]);
-    expect(first.body.nextCursor).toBe("photo-minseo");
+    expect(first.body.items.map((media: { id: string }) => media.id)).toEqual(["media-minseo"]);
+    expect(first.body.nextCursor).toBe("media-minseo");
 
     const second = await request(app.getHttpServer())
-      .get(`/albums/album-1/photo-feed?childTagIds=tag-1&take=1&cursor=${first.body.nextCursor}`)
+      .get(`/albums/album-1/media-feed?childTagIds=tag-1&take=1&cursor=${first.body.nextCursor}`)
       .expect(200);
 
-    expect(second.body.items.map((photo: { id: string }) => photo.id)).toEqual(["photo-together"]);
+    expect(second.body.items.map((media: { id: string }) => media.id)).toEqual(["media-together"]);
     expect(second.body.nextCursor).toBeNull();
   });
 

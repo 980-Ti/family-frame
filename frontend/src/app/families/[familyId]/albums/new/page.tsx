@@ -28,10 +28,10 @@ export default async function NewAlbumPage({
       <div className="mt-5 max-w-xl">
         <p className="eyebrow mb-2">새 앨범</p>
         <h1 className="brand text-3xl font-extrabold sm:text-4xl">
-          어떤 사진을 모아볼까요?
+          어떤 사진과 영상을 모아볼까요?
         </h1>
         <p className="muted mt-3 text-sm leading-6">
-          주제나 기간에 맞는 이름을 붙이고, 사진을 찾기 쉽게 아이 태그를
+          주제나 기간에 맞는 이름을 붙이고, 기록을 찾기 쉽게 아이 태그를
           등록하세요.
         </p>
       </div>

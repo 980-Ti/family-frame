@@ -2,14 +2,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ChildTagFilter } from "./child-tag-filter";
 import { MonthCalendar } from "./month-calendar";
-import { photoFilterPageParams } from "@/lib/photo-filter";
+import { mediaFilterPageParams } from "@/lib/media-filter";
 
 const childTags = [
   { id: "tag-1", albumId: "album-1", name: "민서" },
   { id: "tag-2", albumId: "album-1", name: "준서" }
 ];
 
-describe("child tag photo filter", () => {
+describe("child tag media filter", () => {
   it("summarizes multiple children and builds their filter URLs", () => {
     const markup = renderToStaticMarkup(
       <ChildTagFilter
@@ -28,14 +28,14 @@ describe("child tag photo filter", () => {
     expect(markup).toContain("모두 포함");
     expect(markup).toContain("tags=tag-1%2Ctag-2&amp;match=all");
     expect(markup).toContain("month=2026-07&amp;tags=tag-2");
-    expect(markup).toContain("민서 사진, 선택됨");
-    expect(markup).toContain("준서 사진, 선택됨");
+    expect(markup).toContain("민서 기록, 선택됨");
+    expect(markup).toContain("준서 기록, 선택됨");
     expect(markup).toContain('href="/families/family-1/albums/album-1/calendar?month=2026-07"');
-    expect(photoFilterPageParams(
+    expect(mediaFilterPageParams(
       { childTagIds: ["tag-2"], match: "any", untagged: false },
       { month: "2026-07" }
     ).toString()).toBe("month=2026-07&tags=tag-2");
-    expect(photoFilterPageParams(
+    expect(mediaFilterPageParams(
       { childTagIds: ["tag-1", "tag-2"], match: "all", untagged: false },
       { month: "2026-07" }
     ).toString()).toBe("month=2026-07&tags=tag-1%2Ctag-2&match=all");

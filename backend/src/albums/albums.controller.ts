@@ -2,7 +2,7 @@ import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Param, Post, Query
 import { CurrentUser } from "../auth/current-user.decorator.js";
 import { SessionGuard } from "../auth/session.guard.js";
 import type { AuthUser } from "../auth/auth.types.js";
-import { parsePhotoFilter } from "../common/photo-filter.js";
+import { parseMediaFilter } from "../common/media-filter.js";
 import { CreateAlbumDto, CreateChildTagDto } from "./albums.dto.js";
 import { AlbumsService } from "./albums.service.js";
 
@@ -54,7 +54,7 @@ export class AlbumsController {
       user.id,
       albumId,
       month,
-      parsePhotoFilter({ childTagId, childTagIds, match, untagged })
+      parseMediaFilter({ childTagId, childTagIds, match, untagged })
     );
   }
 }

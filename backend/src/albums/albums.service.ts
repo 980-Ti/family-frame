@@ -8,10 +8,10 @@ import {
 import { PrismaService } from "../common/prisma.service.js";
 import { parseAlbumMonth } from "../common/album-date.js";
 import {
-  EMPTY_PHOTO_FILTER,
-  photoFilterWhere,
-  type PhotoFilter
-} from "../common/photo-filter.js";
+  EMPTY_MEDIA_FILTER,
+  mediaFilterWhere,
+  type MediaFilter
+} from "../common/media-filter.js";
 import { FamiliesService } from "../families/families.service.js";
 import type { CreateAlbumDto } from "./albums.dto.js";
 
@@ -98,7 +98,7 @@ export class AlbumsService {
     userId: string,
     albumId: string,
     month: string,
-    filter: PhotoFilter = EMPTY_PHOTO_FILTER
+    filter: MediaFilter = EMPTY_MEDIA_FILTER
   ) {
     await this.requireAlbum(userId, albumId);
     const start = parseAlbumMonth(month);
@@ -107,25 +107,25 @@ export class AlbumsService {
       albumId,
       albumDate: { gte: start, lt: end },
       status: "READY" as const,
-      ...photoFilterWhere(filter)
+      ...mediaFilterWhere(filter)
     };
     const filtered = filter.untagged || filter.childTagIds.length > 0;
     const [rows, representatives] = await Promise.all([
-      this.prisma.photo.groupBy({
+      this.prisma.media.groupBy({
         by: ["albumDate"],
         where,
         _count: { _all: true },
         orderBy: { albumDate: "asc" }
       }),
       filtered
-        ? this.prisma.photo.findMany({
+        ? this.prisma.media.findMany({
             where,
             select: { id: true, albumDate: true },
             orderBy: [{ albumDate: "asc" }, { createdAt: "desc" }, { id: "desc" }]
           })
         : this.prisma.dailyRepresentative.findMany({
             where: { albumId, albumDate: { gte: start, lt: end } },
-            select: { albumDate: true, photoId: true }
+            select: { albumDate: true, mediaId: true }
           })
     ]);
     const representativeByDate = new Map<string, string>();
@@ -134,7 +134,7 @@ export class AlbumsService {
       if (!representativeByDate.has(date)) {
         representativeByDate.set(
           date,
-          "photoId" in representative ? representative.photoId : representative.id
+          "mediaId" in representative ? representative.mediaId : representative.id
         );
       }
     }
@@ -143,7 +143,7 @@ export class AlbumsService {
       return {
         date,
         count: row._count._all,
-        representativePhotoId: representativeByDate.get(date) ?? null
+        representativeMediaId: representativeByDate.get(date) ?? null
       };
     });
   }

@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState, type KeyboardEvent, type TouchEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, ImagePlus, Minus, Plus, RotateCcw, Trash2, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, ImagePlus, Minus, Play, Plus, RotateCcw, Trash2, X } from "lucide-react";
 import { VirtuosoGrid } from "react-virtuoso";
 import {
   AlertDialog,
@@ -26,19 +26,20 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { clientApi } from "@/lib/api";
-import type { Photo } from "@/lib/types";
+import type { Media } from "@/lib/types";
 import { PrivateImage } from "./private-image";
+import { PrivateVideo } from "./private-video";
 
 type ZoomTransform = { scale: number; x: number; y: number };
 
 const INITIAL_ZOOM: ZoomTransform = { scale: 1, x: 0, y: 0 };
-type ImageLoadState = { photoId: string; status: "loading" | "ready" | "error" };
+type ImageLoadState = { mediaId: string; status: "loading" | "ready" | "error" };
 
-export function canInteractWithPhoto(selectedId: string, image: ImageLoadState): boolean {
-  return image.photoId === selectedId && image.status === "ready";
+export function canInteractWithMedia(selectedId: string, image: ImageLoadState): boolean {
+  return image.mediaId === selectedId && image.status === "ready";
 }
 
-export function nextPresentedPhotoId(
+export function nextPresentedMediaId(
   currentId: string | null,
   requestedId: string,
   status: ImageLoadState["status"]
@@ -62,7 +63,7 @@ export function zoomAtPoint(
   };
 }
 
-export function photoSwipeDirection(
+export function mediaSwipeDirection(
   start: { x: number; y: number },
   end: { x: number; y: number }
 ): -1 | 0 | 1 {
@@ -85,37 +86,37 @@ export function panZoom(
   };
 }
 
-export function PhotoGallery({
-  photos,
+export function MediaGallery({
+  mediaItems,
   currentUserId,
   canDeleteAll,
   uploadHref,
-  emptyTitle = "아직 사진이 없습니다",
-  emptyDescription = "이 날짜의 첫 번째 사진을 추가해 보세요.",
+  emptyTitle = "아직 사진이나 영상이 없습니다",
+  emptyDescription = "이 날짜의 첫 번째 기록을 추가해 보세요.",
   showDate = false,
-  onPhotoRemoved
+  onMediaRemoved
 }: {
-  photos: Photo[];
+  mediaItems: Media[];
   currentUserId: string;
   canDeleteAll: boolean;
   uploadHref: string;
   emptyTitle?: string;
   emptyDescription?: string;
   showDate?: boolean;
-  onPhotoRemoved?: (photoId: string) => void;
+  onMediaRemoved?: (mediaId: string) => void;
 }) {
   const router = useRouter();
   const [removedIds, setRemovedIds] = useState<Set<string>>(() => new Set());
-  const items = photos.filter((photo) => !removedIds.has(photo.id));
+  const items = mediaItems.filter((media) => !removedIds.has(media.id));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [presentedId, setPresentedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
-  const [imageState, setImageState] = useState<ImageLoadState>({ photoId: "", status: "loading" });
+  const [imageState, setImageState] = useState<ImageLoadState>({ mediaId: "", status: "loading" });
   const [imageRequestKey, setImageRequestKey] = useState(0);
-  const handleImageStatus = useCallback((photoId: string, status: ImageLoadState["status"]) => {
-    setImageState({ photoId, status });
-    setPresentedId((current) => nextPresentedPhotoId(current, photoId, status));
+  const handleImageStatus = useCallback((mediaId: string, status: ImageLoadState["status"]) => {
+    setImageState({ mediaId, status });
+    setPresentedId((current) => nextPresentedMediaId(current, mediaId, status));
   }, []);
   const [zoom, setZoom] = useState<ZoomTransform>(INITIAL_ZOOM);
   const zoomRef = useRef<ZoomTransform>(INITIAL_ZOOM);
@@ -143,11 +144,12 @@ export function PhotoGallery({
       if (viewportRef.current === viewport) viewportRef.current = null;
     };
   }, []);
-  const selectedIndex = items.findIndex((photo) => photo.id === selectedId);
+  const selectedIndex = items.findIndex((media) => media.id === selectedId);
   const selected = selectedIndex >= 0 ? items[selectedIndex] : null;
-  const presentedIndex = items.findIndex((photo) => photo.id === presentedId);
+  const selectedIsVideo = selected?.mediaAsset.mimeType === "video/mp4";
+  const presentedIndex = items.findIndex((media) => media.id === presentedId);
   const presented = presentedIndex >= 0 ? items[presentedIndex] : selected;
-  const imageReady = selected ? canInteractWithPhoto(selected.id, imageState) : false;
+  const imageReady = selected ? canInteractWithMedia(selected.id, imageState) : false;
 
   function resetZoom() {
     const initial = { ...INITIAL_ZOOM };
@@ -179,7 +181,7 @@ export function PhotoGallery({
     const touch = event.changedTouches[0];
     touchStartRef.current = null;
     if (!start || !touch || zoomRef.current.scale !== 1) return;
-    const direction = photoSwipeDirection(start, { x: touch.clientX, y: touch.clientY });
+    const direction = mediaSwipeDirection(start, { x: touch.clientX, y: touch.clientY });
     if (direction) move(direction);
   }
 
@@ -224,13 +226,13 @@ export function PhotoGallery({
     setDeleting(true);
     setError("");
     try {
-      await clientApi(`/photos/${selected.id}`, { method: "DELETE" });
+      await clientApi(`/media/${selected.id}`, { method: "DELETE" });
       setRemovedIds((current) => new Set(current).add(selected.id));
-      onPhotoRemoved?.(selected.id);
+      onMediaRemoved?.(selected.id);
       close();
-      if (!onPhotoRemoved) router.refresh();
+      if (!onMediaRemoved) router.refresh();
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "사진을 삭제하지 못했습니다.");
+      setError(reason instanceof Error ? reason.message : "파일을 삭제하지 못했습니다.");
     } finally {
       setDeleting(false);
     }
@@ -246,44 +248,52 @@ export function PhotoGallery({
             </span>
             <span className="font-semibold text-foreground">{emptyTitle}</span>
               <span className="text-pretty text-base font-normal leading-6 text-muted-foreground">{emptyDescription}</span>
-              <span className="mt-3 text-[15px] font-bold text-primary">첫 사진 추가하기 →</span>
+              <span className="mt-3 text-[15px] font-bold text-primary">첫 기록 추가하기 →</span>
           </Link>
         </Button>
       </Card>
     );
   }
 
-  function renderPhoto(photo: Photo) {
+  function renderMedia(media: Media) {
+    const isVideo = media.mediaAsset.mimeType === "video/mp4";
     return (
       <figure
         className="gallery-item relative transition-transform duration-150 hover:-translate-y-0.5"
-        key={photo.id}
+        key={media.id}
       >
         <Button
           variant="ghost"
-          className="h-full w-full cursor-zoom-in rounded-none p-0"
+          className={`h-full w-full rounded-none p-0 ${isVideo ? "cursor-pointer" : "cursor-zoom-in"}`}
           type="button"
-          aria-label={`${photo.originalName} 크게 보기`}
+          aria-label={`${media.originalName} ${isVideo ? "영상 재생" : "크게 보기"}`}
           aria-haspopup="dialog"
           onClick={() => {
-            setSelectedId(photo.id);
-            setPresentedId(photo.id);
+            setSelectedId(media.id);
+            setPresentedId(media.id);
             resetZoom();
             setError("");
           }}
         >
           <PrivateImage
-            photoId={photo.id}
+            mediaId={media.id}
             variant="thumbnail"
-            alt={photo.originalName}
+            alt={media.originalName}
             className="h-full w-full object-cover"
           />
+          {isVideo ? (
+            <span className="pointer-events-none absolute inset-0 grid place-items-center" aria-hidden="true">
+              <span className="grid size-11 place-items-center rounded-full bg-black/55 text-white shadow-sm">
+                <Play className="size-5 fill-current" />
+              </span>
+            </span>
+          ) : null}
         </Button>
-        {showDate || photo.childTags.length > 0 ? (
+        {showDate || media.childTags.length > 0 ? (
           <span className="pointer-events-none absolute bottom-2 left-2 max-w-[calc(100%-16px)] truncate rounded-md bg-black/60 px-2 py-1 text-xs font-semibold text-white backdrop-blur-sm">
-            {showDate ? photo.albumDate.slice(0, 10) : ""}
-            {showDate && photo.childTags.length > 0 ? " · " : ""}
-            {photo.childTags.map((tag) => tag.name).join(" · ")}
+            {showDate ? media.albumDate.slice(0, 10) : ""}
+            {showDate && media.childTags.length > 0 ? " · " : ""}
+            {media.childTags.map((tag) => tag.name).join(" · ")}
           </span>
         ) : null}
       </figure>
@@ -295,18 +305,18 @@ export function PhotoGallery({
       <VirtuosoGrid
         useWindowScroll
         data={items}
-        computeItemKey={(_, photo) => photo.id}
+        computeItemKey={(_, media) => media.id}
         listClassName="gallery"
         itemClassName="gallery-cell"
         initialItemCount={Math.min(items.length, 40)}
         increaseViewportBy={{ top: 400, bottom: 800 }}
-        itemContent={(_, photo) => renderPhoto(photo)}
+        itemContent={(_, media) => renderMedia(media)}
       />
 
       <Dialog open={selected !== null} onOpenChange={(open) => { if (!open) close(); }}>
         {selected && (
-          <DialogContent className="photo-dialog max-w-none gap-0 p-0 text-white" showCloseButton={false} onKeyDown={handleKeyDown}>
-          <div className="photo-dialog-content">
+          <DialogContent className="media-dialog max-w-none gap-0 p-0 text-white" showCloseButton={false} onKeyDown={handleKeyDown}>
+          <div className="media-dialog-content">
             <div className="flex min-h-14 items-center justify-between gap-4 border-b border-white/10 px-4 sm:px-5">
               <div className="min-w-0">
                 <DialogTitle className="truncate text-[15px] font-semibold text-white">{presented?.originalName}</DialogTitle>
@@ -319,43 +329,52 @@ export function PhotoGallery({
                 </DialogDescription>
               </div>
               <DialogClose asChild>
-                <Button variant="ghost" size="icon" className="shrink-0 rounded-full text-white/75 hover:bg-white/10 hover:text-white" aria-label="사진 닫기">
+                <Button variant="ghost" size="icon" className="shrink-0 rounded-full text-white/75 hover:bg-white/10 hover:text-white" aria-label="뷰어 닫기">
                   <X aria-hidden="true" />
                 </Button>
               </DialogClose>
             </div>
 
-            <div className="photo-dialog-stage">
+            <div className="media-dialog-stage">
               <div
-                className="photo-dialog-viewport"
-                ref={setViewportRef}
-                style={{ touchAction: zoom.scale > 1 ? "none" : "pan-y" }}
+                className="media-dialog-viewport"
+                ref={selectedIsVideo ? undefined : setViewportRef}
+                style={{ touchAction: !selectedIsVideo && zoom.scale > 1 ? "none" : "pan-y" }}
                 onTouchStart={startSwipe}
                 onTouchMove={moveTouch}
                 onTouchEnd={endSwipe}
                 onTouchCancel={() => { touchStartRef.current = null; }}
               >
                 <div
-                  className="photo-dialog-canvas"
-                  style={{ transform: `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})` }}
+                  className="media-dialog-canvas"
+                  style={{ transform: selectedIsVideo ? undefined : `translate3d(${zoom.x}px, ${zoom.y}px, 0) scale(${zoom.scale})` }}
                 >
-                  <PrivateImage
-                    photoId={selected.id}
-                    variant="display"
-                    alt={selected.originalName}
-                    className="h-full w-full object-contain"
-                    requestKey={imageRequestKey}
-                    onStatusChange={handleImageStatus}
-                  />
+                  {selectedIsVideo ? (
+                    <PrivateVideo
+                      mediaId={selected.id}
+                      className="h-full w-full object-contain"
+                      requestKey={imageRequestKey}
+                      onStatusChange={handleImageStatus}
+                    />
+                  ) : (
+                    <PrivateImage
+                      mediaId={selected.id}
+                      variant="display"
+                      alt={selected.originalName}
+                      className="h-full w-full object-contain"
+                      requestKey={imageRequestKey}
+                      onStatusChange={handleImageStatus}
+                    />
+                  )}
                 </div>
                 {!imageReady && (
                   <div
-                    className="photo-dialog-status"
-                    data-error={imageState.photoId === selected.id && imageState.status === "error"}
+                    className="media-dialog-status"
+                    data-error={imageState.mediaId === selected.id && imageState.status === "error"}
                   >
-                    {imageState.photoId === selected.id && imageState.status === "error" ? (
+                    {imageState.mediaId === selected.id && imageState.status === "error" ? (
                       <div className="flex flex-col items-center gap-3 text-center">
-                        <p className="text-sm font-medium text-white" role="alert">사진을 불러오지 못했습니다.</p>
+                        <p className="text-sm font-medium text-white" role="alert">파일을 불러오지 못했습니다.</p>
                         <Button
                           type="button"
                           variant="secondary"
@@ -366,7 +385,7 @@ export function PhotoGallery({
                         </Button>
                       </div>
                     ) : (
-                      <p className="text-sm font-medium text-white/80" role="status">사진 불러오는 중…</p>
+                      <p className="text-sm font-medium text-white/80" role="status">파일 불러오는 중…</p>
                     )}
                   </div>
                 )}
@@ -376,9 +395,9 @@ export function PhotoGallery({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="photo-dialog-arrow photo-dialog-arrow-previous"
+                    className="media-dialog-arrow media-dialog-arrow-previous"
                     type="button"
-                    aria-label="이전 사진"
+                    aria-label="이전 항목"
                     onClick={() => move(-1)}
                   >
                     <ChevronLeft aria-hidden="true" />
@@ -386,9 +405,9 @@ export function PhotoGallery({
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="photo-dialog-arrow photo-dialog-arrow-next"
+                    className="media-dialog-arrow media-dialog-arrow-next"
                     type="button"
-                    aria-label="다음 사진"
+                    aria-label="다음 항목"
                     onClick={() => move(1)}
                   >
                     <ChevronRight aria-hidden="true" />
@@ -397,11 +416,11 @@ export function PhotoGallery({
               )}
             </div>
 
-            <div className="photo-dialog-footer">
+            <div className="media-dialog-footer">
               <p className="invisible min-w-0 truncate text-xs text-white/55 sm:visible">
-                ← → 키로 사진을 이동할 수 있어요
+                ← → 키로 항목을 이동할 수 있어요
               </p>
-              <div className="flex items-center gap-1 text-white">
+              <div className={`items-center gap-1 text-white ${selectedIsVideo ? "hidden" : "flex"}`}>
                 <Button variant="ghost" size="icon" type="button" disabled={!imageReady || zoom.scale <= 1} aria-label="축소" onClick={() => changeZoom(1)}>
                   <Minus aria-hidden="true" />
                 </Button>
@@ -424,19 +443,19 @@ export function PhotoGallery({
                 {(canDeleteAll || selected.uploadedById === currentUserId) && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button aria-label={deleting ? "사진 삭제 중" : "사진 삭제"} variant="ghost" className="shrink-0 text-[#ff8b82] hover:bg-white/10 hover:text-[#ffaaa3]" disabled={deleting || !imageReady}>
+                      <Button aria-label={deleting ? "삭제 중" : "삭제"} variant="ghost" className="shrink-0 text-[#ff8b82] hover:bg-white/10 hover:text-[#ffaaa3]" disabled={deleting || !imageReady}>
                         <Trash2 aria-hidden="true" />
-                        <span className="hidden sm:inline">{deleting ? "삭제 중…" : "사진 삭제"}</span>
+                        <span className="hidden sm:inline">{deleting ? "삭제 중…" : selectedIsVideo ? "영상 삭제" : "사진 삭제"}</span>
                       </Button>
                     </AlertDialogTrigger>
                     <AlertDialogContent>
                       <AlertDialogHeader>
-                        <AlertDialogTitle>이 사진을 삭제할까요?</AlertDialogTitle>
-                        <AlertDialogDescription>삭제한 사진은 복구할 수 없습니다.</AlertDialogDescription>
+                        <AlertDialogTitle>이 {selectedIsVideo ? "영상" : "사진"}을 삭제할까요?</AlertDialogTitle>
+                        <AlertDialogDescription>삭제한 파일은 복구할 수 없습니다.</AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
                         <AlertDialogCancel>취소</AlertDialogCancel>
-                        <AlertDialogAction onClick={() => void remove()}>사진 삭제</AlertDialogAction>
+                        <AlertDialogAction onClick={() => void remove()}>삭제</AlertDialogAction>
                       </AlertDialogFooter>
                     </AlertDialogContent>
                   </AlertDialog>

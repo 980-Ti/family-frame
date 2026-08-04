@@ -13,7 +13,7 @@ enum FamilyRole {
   MEMBER
 }
 
-enum PhotoStatus {
+enum MediaStatus {
   PENDING_UPLOAD
   PROCESSING
   READY
@@ -21,7 +21,7 @@ enum PhotoStatus {
   DELETED
 }
 
-enum PhotoDateSource {
+enum MediaDateSource {
   EXIF_ORIGINAL
   EXIF_CREATED
   FILE_MODIFIED
@@ -43,7 +43,7 @@ model User {
   createdAt    DateTime       @default(now())
   sessions     Session[]
   memberships  FamilyMember[]
-  uploaded     Photo[]        @relation("UploadedBy")
+  uploaded     Media[]        @relation("UploadedBy")
   createdInvites FamilyInvite[] @relation("InviteCreator")
 }
 
@@ -102,7 +102,7 @@ model Album {
   name            String
   createdAt       DateTime              @default(now())
   family          Family                @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  photos          Photo[]
+  mediaItems          Media[]
   representatives DailyRepresentative[]
   childTags       ChildTag[]
 
@@ -115,7 +115,7 @@ model ChildTag {
   name      String
   createdAt DateTime        @default(now())
   album     Album           @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  photos    PhotoChildTag[]
+  mediaItems    MediaChildTag[]
 
   @@unique([albumId, name])
   @@index([albumId])
@@ -135,24 +135,24 @@ model MediaAsset {
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
   family       Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  photos       Photo[]
+  mediaItems       Media[]
 
   @@unique([familyId, sha256])
   @@index([familyId])
 }
 
-model Photo {
+model Media {
   id             String      @id @default(cuid())
   albumId        String
   mediaAssetId   String?
   uploadedById   String
   albumDate      DateTime    @db.Date
   capturedAt     DateTime?
-  dateSource     PhotoDateSource @default(USER)
+  dateSource     MediaDateSource @default(USER)
   clientUploadId String
   tempObjectKey  String?
   originalName   String
-  status         PhotoStatus @default(PENDING_UPLOAD)
+  status         MediaStatus @default(PENDING_UPLOAD)
   failureReason  String?
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -160,21 +160,21 @@ model Photo {
   mediaAsset     MediaAsset? @relation(fields: [mediaAssetId], references: [id])
   uploadedBy     User        @relation("UploadedBy", fields: [uploadedById], references: [id])
   representative DailyRepresentative?
-  childTags      PhotoChildTag[]
+  childTags      MediaChildTag[]
 
   @@unique([albumId, clientUploadId])
   @@index([albumId, albumDate, status])
-  @@index([albumId, status, albumDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "Photo_feed_idx")
+  @@index([albumId, status, albumDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "Media_feed_idx")
   @@index([mediaAssetId])
 }
 
-model PhotoChildTag {
-  photoId    String
+model MediaChildTag {
+  mediaId    String
   childTagId String
-  photo      Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  media      Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
   childTag   ChildTag @relation(fields: [childTagId], references: [id], onDelete: Cascade)
 
-  @@id([photoId, childTagId])
+  @@id([mediaId, childTagId])
   @@index([childTagId])
 }
 
@@ -182,9 +182,9 @@ model DailyRepresentative {
   id        String   @id @default(cuid())
   albumId   String
   albumDate DateTime @db.Date
-  photoId   String   @unique
+  mediaId   String   @unique
   album     Album    @relation(fields: [albumId], references: [id], onDelete: Cascade)
-  photo     Photo    @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  media     Media    @relation(fields: [mediaId], references: [id], onDelete: Cascade)
 
   @@unique([albumId, albumDate])
 }

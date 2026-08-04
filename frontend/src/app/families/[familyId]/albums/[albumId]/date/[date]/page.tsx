@@ -2,17 +2,17 @@ import Link from "next/link";
 import { ArrowLeft, ImagePlus } from "lucide-react";
 import { notFound, redirect } from "next/navigation";
 import { ChildTagFilter } from "@/components/child-tag-filter";
-import { PhotoGallery } from "@/components/photo-gallery";
+import { MediaGallery } from "@/components/media-gallery";
 import { Button } from "@/components/ui/button";
 import {
-  parsePhotoFilter,
-  photoFilterApiParams,
-  photoFilterKey,
-  photoFilterPageParams
-} from "@/lib/photo-filter";
+  parseMediaFilter,
+  mediaFilterApiParams,
+  mediaFilterKey,
+  mediaFilterPageParams
+} from "@/lib/media-filter";
 import { currentUser } from "@/lib/current-user";
 import { protectedApi } from "@/lib/protected-api";
-import type { Family, Photo } from "@/lib/types";
+import type { Family, Media } from "@/lib/types";
 
 export default async function DatePage({
   params,
@@ -27,12 +27,12 @@ export default async function DatePage({
   }>;
 }) {
   const { familyId, albumId, date } = await params;
-  const filter = parsePhotoFilter(await searchParams);
-  const apiQuery = photoFilterApiParams(filter, { date });
-  const pageQuery = photoFilterPageParams(filter).toString();
+  const filter = parseMediaFilter(await searchParams);
+  const apiQuery = mediaFilterApiParams(filter, { date });
+  const pageQuery = mediaFilterPageParams(filter).toString();
   const returnTo = `/families/${familyId}/albums/${albumId}/date/${date}${pageQuery ? `?${pageQuery}` : ""}`;
-  const [photos, families, user] = await Promise.all([
-    protectedApi<Photo[]>(`/albums/${albumId}/photos?${apiQuery}`, returnTo),
+  const [mediaItems, families, user] = await Promise.all([
+    protectedApi<Media[]>(`/albums/${albumId}/media?${apiQuery}`, returnTo),
     protectedApi<Family[]>("/families", returnTo),
     currentUser()
   ]);
@@ -52,7 +52,7 @@ export default async function DatePage({
       : selectedNames[0];
   const month = date.slice(0, 7);
   const uploadHref = `/families/${familyId}/albums/${albumId}/upload?date=${date}`;
-  const calendarParams = photoFilterPageParams(filter, { month });
+  const calendarParams = mediaFilterPageParams(filter, { month });
   const dateValue = new Date(`${date}T00:00:00+09:00`);
   const yearLabel = new Intl.DateTimeFormat("ko-KR", { year: "numeric" }).format(dateValue);
   const dateLabel = new Intl.DateTimeFormat("ko-KR", {
@@ -77,12 +77,12 @@ export default async function DatePage({
             </h1>
             <span className="weekday-badge">{weekdayLabel}</span>
           </div>
-          <p className="date-photo-count">{filterLabel ? `${filterLabel} 사진 ` : "사진 "}<strong>{photos.length}장</strong></p>
+          <p className="date-media-count">{filterLabel ? `${filterLabel} 기록 ` : "사진·영상 "}<strong>{mediaItems.length}개</strong></p>
         </div>
         <Button asChild>
           <Link href={uploadHref}>
             <ImagePlus aria-hidden="true" />
-            사진 추가
+            사진·영상 추가
           </Link>
         </Button>
       </div>
@@ -91,14 +91,14 @@ export default async function DatePage({
         childTags={album.childTags}
         filter={filter}
       />
-      <PhotoGallery
-        key={photoFilterKey(filter)}
-        photos={photos}
+      <MediaGallery
+        key={mediaFilterKey(filter)}
+        mediaItems={mediaItems}
         currentUserId={user.id}
         canDeleteAll={family.members[0]?.role === "OWNER"}
         uploadHref={uploadHref}
-        emptyTitle={filterLabel ? `${filterLabel} 사진이 아직 없습니다` : undefined}
-        emptyDescription={filterLabel ? "다른 필터를 선택하거나 새 사진을 추가해 보세요." : undefined}
+        emptyTitle={filterLabel ? `${filterLabel} 기록이 아직 없습니다` : undefined}
+        emptyDescription={filterLabel ? "다른 필터를 선택하거나 새 사진·영상을 추가해 보세요." : undefined}
       />
     </section>
   );

@@ -14,7 +14,7 @@ export default function NotFound() {
           이 장면은 앨범에 없어요.
         </h1>
         <p className="muted mt-5 max-w-lg text-pretty text-base leading-7 sm:text-lg">
-          주소가 바뀌었거나 페이지가 정리된 것 같아요. 앨범으로 돌아가 이어서 사진을 확인해 보세요.
+          주소가 바뀌었거나 페이지가 정리된 것 같아요. 앨범으로 돌아가 이어서 미디어를 확인해 보세요.
         </p>
         <Button asChild className="mt-8">
           <Link href="/families">
@@ -35,7 +35,7 @@ export default function NotFound() {
           </div>
           <div className="flex items-center justify-between px-1 pb-1 pt-4 text-xs font-bold text-muted-foreground">
             <span>Family Frame</span>
-            <span>사진 없음</span>
+            <span>미디어 없음</span>
           </div>
         </div>
       </div>

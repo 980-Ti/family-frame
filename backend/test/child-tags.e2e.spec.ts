@@ -235,9 +235,9 @@ describe("child tag API", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("deletes an owned album child tag without deleting a photo", async () => {
+  it("deletes an owned album child tag without deleting a media", async () => {
     const deleteMany = vi.fn(async () => ({ count: 1 }));
-    const photoDelete = vi.fn();
+    const mediaDelete = vi.fn();
     const prisma = {
       familyMember: {
         findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
@@ -246,7 +246,7 @@ describe("child tag API", () => {
         findUnique: async () => ({ id: "album-1", familyId: "family-1", name: "우리의 여름" })
       },
       childTag: { deleteMany },
-      photo: { delete: photoDelete }
+      media: { delete: mediaDelete }
     };
     app = await createChildTagTestApp(prisma);
 
@@ -255,7 +255,7 @@ describe("child tag API", () => {
       .expect(204);
 
     expect(deleteMany).toHaveBeenCalledWith({ where: { id: "tag-1", albumId: "album-1" } });
-    expect(photoDelete).not.toHaveBeenCalled();
+    expect(mediaDelete).not.toHaveBeenCalled();
   });
 
   it("does not reveal a missing tag or a tag from another album", async () => {

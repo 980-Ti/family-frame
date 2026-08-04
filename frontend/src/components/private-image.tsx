@@ -8,7 +8,7 @@ export type PrivateImageVariant = "thumbnail" | "display";
 
 type CachedUrl = { url: string; expiresAt: number };
 type ImageSource = {
-  photoId: string;
+  mediaId: string;
   variant: PrivateImageVariant;
   url: string;
   alt: string;
@@ -18,29 +18,29 @@ const signedUrlCache = new Map<string, CachedUrl>();
 const SIGNED_URL_CACHE_MS = 60_000;
 export const MAX_SIGNED_URL_CACHE_ENTRIES = 160;
 
-function imageKey(photoId: string, variant: PrivateImageVariant) {
-  return `${photoId}:${variant}`;
+function imageKey(mediaId: string, variant: PrivateImageVariant) {
+  return `${mediaId}:${variant}`;
 }
 
-export function clearPrivateImageUrlCache(photoId?: string, variant?: PrivateImageVariant) {
-  if (!photoId) {
+export function clearPrivateImageUrlCache(mediaId?: string, variant?: PrivateImageVariant) {
+  if (!mediaId) {
     signedUrlCache.clear();
     return;
   }
   if (variant) {
-    signedUrlCache.delete(imageKey(photoId, variant));
+    signedUrlCache.delete(imageKey(mediaId, variant));
     return;
   }
-  signedUrlCache.delete(imageKey(photoId, "thumbnail"));
-  signedUrlCache.delete(imageKey(photoId, "display"));
+  signedUrlCache.delete(imageKey(mediaId, "thumbnail"));
+  signedUrlCache.delete(imageKey(mediaId, "display"));
 }
 
 export async function getPrivateImageUrl(
-  photoId: string,
+  mediaId: string,
   variant: PrivateImageVariant,
   signal?: AbortSignal
 ) {
-  const key = imageKey(photoId, variant);
+  const key = imageKey(mediaId, variant);
   const cached = signedUrlCache.get(key);
   if (cached && cached.expiresAt > Date.now()) {
     return cached.url;
@@ -48,7 +48,7 @@ export async function getPrivateImageUrl(
   if (cached) signedUrlCache.delete(key);
 
   const result = await clientApi<{ url: string }>(
-    `/photos/${photoId}/url?variant=${variant}`,
+    `/media/${mediaId}/url?variant=${variant}`,
     { signal }
   );
   signedUrlCache.set(key, {
@@ -68,21 +68,21 @@ export function shouldRequestPrivateImage(
 }
 
 export function PrivateImage({
-  photoId,
+  mediaId,
   variant = "thumbnail",
   alt,
   className,
   requestKey = 0,
   onStatusChange
 }: {
-  photoId: string;
+  mediaId: string;
   variant?: PrivateImageVariant;
   alt: string;
   className?: string;
   requestKey?: number;
-  onStatusChange?: (photoId: string, status: "loading" | "ready" | "error") => void;
+  onStatusChange?: (mediaId: string, status: "loading" | "ready" | "error") => void;
 }) {
-  const key = imageKey(photoId, variant);
+  const key = imageKey(mediaId, variant);
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
   const [source, setSource] = useState<ImageSource>();
   const [reloadKey, setReloadKey] = useState(0);
@@ -115,9 +115,9 @@ export function PrivateImage({
   useEffect(() => {
     if (!shouldRequest) return;
     const controller = new AbortController();
-    onStatusRef.current?.(photoId, "loading");
+    onStatusRef.current?.(mediaId, "loading");
 
-    void getPrivateImageUrl(photoId, variant, controller.signal)
+    void getPrivateImageUrl(mediaId, variant, controller.signal)
       .then(async (url) => {
         if (variant === "display") {
           const image = new window.Image();
@@ -125,27 +125,27 @@ export function PrivateImage({
           await image.decode();
         }
         if (controller.signal.aborted) return;
-        setSource({ photoId, variant, url, alt });
-        onStatusRef.current?.(photoId, "ready");
+        setSource({ mediaId, variant, url, alt });
+        onStatusRef.current?.(mediaId, "ready");
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        clearPrivateImageUrlCache(photoId, variant);
-        onStatusRef.current?.(photoId, "error");
+        clearPrivateImageUrlCache(mediaId, variant);
+        onStatusRef.current?.(mediaId, "error");
       });
 
     return () => controller.abort();
-  }, [alt, photoId, reloadKey, requestKey, shouldRequest, variant]);
+  }, [alt, mediaId, reloadKey, requestKey, shouldRequest, variant]);
 
   const displayedSource = variant === "display"
     ? source
-    : source?.photoId === photoId && source.variant === variant
+    : source?.mediaId === mediaId && source.variant === variant
       ? source
       : undefined;
 
   function handleImageError() {
-    if (!displayedSource || displayedSource.photoId !== photoId) return;
-    clearPrivateImageUrlCache(photoId, variant);
+    if (!displayedSource || displayedSource.mediaId !== mediaId) return;
+    clearPrivateImageUrlCache(mediaId, variant);
     const retryScope = `${key}:${requestKey}`;
     if (retryRef.current.scope !== retryScope) {
       retryRef.current = { scope: retryScope, attempted: false };
@@ -155,7 +155,7 @@ export function PrivateImage({
       setReloadKey((current) => current + 1);
       return;
     }
-    onStatusRef.current?.(photoId, "error");
+    onStatusRef.current?.(mediaId, "error");
   }
 
   if (!displayedSource) {

@@ -184,12 +184,12 @@ a:focus-visible {
   font-size: 0.8125rem;
   font-weight: 800;
 }
-.date-photo-count {
+.date-media-count {
   margin-top: 12px;
   color: var(--muted);
   font-size: 0.9375rem;
 }
-.date-photo-count strong { color: var(--text); font-weight: 800; }
+.date-media-count strong { color: var(--text); font-weight: 800; }
 .onboarding {
   display: grid;
   min-height: calc(100vh - 180px);
@@ -310,9 +310,9 @@ a:focus-visible {
   text-align: center;
 }
 .calendar-weekdays [data-weekday="0"],
-.day[data-weekday="0"]:not(.has-photo) .day-number { color: var(--accent-hover); }
+.day[data-weekday="0"]:not(.has-media) .day-number { color: var(--accent-hover); }
 .calendar-weekdays [data-weekday="6"],
-.day[data-weekday="6"]:not(.has-photo) .day-number { color: #3f6b5a; }
+.day[data-weekday="6"]:not(.has-media) .day-number { color: #3f6b5a; }
 .day {
   position: relative;
   min-height: clamp(108px, 10vw, 128px);
@@ -349,14 +349,14 @@ a:focus-visible {
   box-shadow: 0 0 0 3px rgb(23 107 85 / 20%);
   outline: none;
 }
-.day.has-photo { border-color: transparent; color: white; background: #30313a; }
-.day.has-photo::after {
+.day.has-media { border-color: transparent; color: white; background: #30313a; }
+.day.has-media::after {
   position: absolute;
   inset: 0;
   background: linear-gradient(180deg, rgb(0 0 0 / 12%), rgb(0 0 0 / 58%));
   content: "";
 }
-.day.has-photo .day-number { background: rgb(0 0 0 / 26%); }
+.day.has-media .day-number { background: rgb(0 0 0 / 26%); }
 .day-count {
   position: absolute;
   bottom: 10px;
@@ -403,7 +403,7 @@ a:focus-visible {
   box-shadow: inset 0 0 0 3px var(--accent);
   outline: none;
 }
-.photo-dialog {
+.media-dialog {
   width: min(1100px, calc(100vw - 32px));
   max-width: none;
   height: min(820px, calc(100dvh - 32px));
@@ -418,24 +418,24 @@ a:focus-visible {
   padding: 0;
   box-shadow: 0 28px 80px rgb(0 0 0 / 35%);
 }
-.photo-dialog::backdrop {
+.media-dialog::backdrop {
   background: rgb(5 7 10 / 78%);
   backdrop-filter: blur(5px);
 }
-.photo-dialog-content {
+.media-dialog-content {
   display: grid;
   height: 100%;
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr) auto;
 }
-.photo-dialog-stage {
+.media-dialog-stage {
   display: grid;
   min-height: 0;
   grid-template-columns: 88px minmax(0, 1fr) 88px;
   overflow: hidden;
   background: #050607;
 }
-.photo-dialog-viewport {
+.media-dialog-viewport {
   position: relative;
   grid-column: 2;
   grid-row: 1;
@@ -445,7 +445,7 @@ a:focus-visible {
   padding: 0;
   overscroll-behavior: contain;
 }
-.photo-dialog-canvas {
+.media-dialog-canvas {
   display: grid;
   width: 100%;
   height: 100%;
@@ -454,13 +454,13 @@ a:focus-visible {
   place-items: center;
   will-change: transform;
 }
-.photo-dialog-canvas > img {
+.media-dialog-canvas > img {
   display: block;
   width: 100%;
   height: 100%;
 }
-.photo-dialog-canvas > div { width: 100%; height: 100%; }
-.photo-dialog-status {
+.media-dialog-canvas > div { width: 100%; height: 100%; }
+.media-dialog-status {
   position: absolute;
   z-index: 2;
   bottom: 14px;
@@ -475,13 +475,13 @@ a:focus-visible {
   transform: translateX(-50%);
   white-space: nowrap;
 }
-.photo-dialog-status[data-error="true"] {
+.media-dialog-status[data-error="true"] {
   border-radius: 14px;
   padding: 14px;
   pointer-events: auto;
   white-space: normal;
 }
-.photo-dialog-arrow {
+.media-dialog-arrow {
   display: grid;
   width: 44px;
   height: 44px;
@@ -493,11 +493,11 @@ a:focus-visible {
   place-items: center;
   z-index: 1;
 }
-.photo-dialog-arrow-previous { grid-column: 1; grid-row: 1; }
-.photo-dialog-arrow-next { grid-column: 3; grid-row: 1; }
-.photo-dialog-arrow:hover { background: rgb(255 255 255 / 20%); }
-.photo-dialog button { touch-action: manipulation; }
-.photo-dialog-footer {
+.media-dialog-arrow-previous { grid-column: 1; grid-row: 1; }
+.media-dialog-arrow-next { grid-column: 3; grid-row: 1; }
+.media-dialog-arrow:hover { background: rgb(255 255 255 / 20%); }
+.media-dialog button { touch-action: manipulation; }
+.media-dialog-footer {
   display: grid;
   min-height: 64px;
   grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
@@ -506,8 +506,8 @@ a:focus-visible {
   border-top: 1px solid rgb(255 255 255 / 10%);
   padding: 0 20px;
 }
-.photo-dialog-footer > :last-child { justify-self: end; }
-.photo-dialog button:focus-visible {
+.media-dialog-footer > :last-child { justify-self: end; }
+.media-dialog button:focus-visible {
   box-shadow: 0 0 0 3px rgb(255 255 255 / 40%);
   outline: none;
 }
@@ -743,20 +743,20 @@ a:focus-visible {
   .day-number { width: 24px; height: 24px; font-size: 0.75rem; }
   .day-count { right: 5px; bottom: 5px; left: auto; padding: 2px 5px; }
   .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .photo-dialog {
+  .media-dialog {
     width: 100%;
     height: 100dvh;
     border-radius: 0;
   }
-  .photo-dialog-content {
+  .media-dialog-content {
     padding: env(safe-area-inset-top) env(safe-area-inset-right)
       env(safe-area-inset-bottom) env(safe-area-inset-left);
   }
-  .photo-dialog-stage { grid-template-columns: minmax(0, 1fr); }
-  .photo-dialog-viewport { grid-column: 1; padding: 0; }
-  .photo-dialog-arrow-previous { grid-column: 1; justify-self: start; margin-left: 8px; }
-  .photo-dialog-arrow-next { grid-column: 1; justify-self: end; margin-right: 8px; }
-  .photo-dialog-footer {
+  .media-dialog-stage { grid-template-columns: minmax(0, 1fr); }
+  .media-dialog-viewport { grid-column: 1; padding: 0; }
+  .media-dialog-arrow-previous { grid-column: 1; justify-self: start; margin-left: 8px; }
+  .media-dialog-arrow-next { grid-column: 1; justify-self: end; margin-right: 8px; }
+  .media-dialog-footer {
     gap: 8px;
     padding: 0 12px;
   }

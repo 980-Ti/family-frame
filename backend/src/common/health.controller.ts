@@ -1,5 +1,5 @@
 import { Controller, Get, ServiceUnavailableException } from "@nestjs/common";
-import { StorageService } from "../photos/storage.service.js";
+import { StorageService } from "../media/storage.service.js";
 import { PrismaService } from "./prisma.service.js";
 
 @Controller("health")

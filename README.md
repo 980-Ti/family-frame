@@ -1,10 +1,10 @@
 # Family Frame
 
-가족 구성원만 접근할 수 있는 아이 사진 달력 앨범입니다. 브라우저는 Next.js를 통해 NestJS API를 사용하고, 메타데이터는 PostgreSQL에, 원본과 파생 이미지는 S3 호환 비공개 저장소에 보관합니다.
+가족 구성원만 접근할 수 있는 아이 사진·영상 달력 앨범입니다. 브라우저는 Next.js를 통해 NestJS API를 사용하고, 메타데이터는 PostgreSQL에, 원본 미디어와 파생 이미지는 S3 호환 비공개 저장소에 보관합니다.
 
 ## 로컬 실행
 
-요구 사항은 Node.js 24+, Docker Desktop입니다. 전역 `pnpm` 설치는 필요하지 않습니다.
+요구 사항은 Node.js 24+, Docker Desktop, FFmpeg(`ffmpeg`와 `ffprobe`가 PATH에 등록된 상태)입니다. 전역 `pnpm` 설치는 필요하지 않습니다.
 
 ```powershell
 Copy-Item .env.example .env

@@ -66,7 +66,7 @@ export function AuthForm({ mode, returnTo }: { mode: "login" | "signup"; returnT
             오래 간직하세요.
           </p>
           <p className="mt-5 max-w-sm text-base leading-7 text-white/65">
-            사진은 날짜별로 차곡차곡 정리되고, 초대한 가족에게만 열립니다.
+            사진과 영상은 날짜별로 차곡차곡 정리되고, 초대한 가족에게만 열립니다.
           </p>
         </div>
         <div className="relative z-10 flex items-center gap-3 text-xs text-white/50">
@@ -83,7 +83,7 @@ export function AuthForm({ mode, returnTo }: { mode: "login" | "signup"; returnT
             {mode === "login" ? "Family Frame에 로그인" : "가족 앨범 시작하기"}
           </h1>
           <p className="muted mt-3 mb-8 text-base leading-7">
-            {mode === "login" ? "가족과 공유한 사진을 이어서 확인하세요." : "계정을 만든 후 첫 번째 가족 앨범을 설정할 수 있어요."}
+            {mode === "login" ? "가족과 공유한 기록을 이어서 확인하세요." : "계정을 만든 후 첫 번째 가족 앨범을 설정할 수 있어요."}
           </p>
           <form onSubmit={submit} className="space-y-5">
             {mode === "signup" && (

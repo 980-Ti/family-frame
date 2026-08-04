@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { currentAlbumMonth, suggestPhotoDate } from "./photo-date";
+import { currentAlbumMonth, suggestMediaDate } from "./media-date";
 
 describe("album calendar month", () => {
   it("uses the Korean calendar date instead of UTC", () => {
@@ -7,12 +7,12 @@ describe("album calendar month", () => {
   });
 });
 
-describe("photo date suggestion", () => {
+describe("media date suggestion", () => {
   it("prefers the original EXIF capture date", () => {
     const original = new Date(2026, 6, 28, 15, 30);
     const created = new Date(2026, 6, 29, 9, 0);
 
-    expect(suggestPhotoDate({
+    expect(suggestMediaDate({
       dateTimeOriginal: original,
       createDate: created,
       fileLastModified: new Date(2026, 6, 30, 12, 0),
@@ -27,7 +27,7 @@ describe("photo date suggestion", () => {
   it("keeps a date chosen from the album while preserving capture metadata", () => {
     const original = new Date(2026, 6, 28, 15, 30);
 
-    expect(suggestPhotoDate({
+    expect(suggestMediaDate({
       defaultDate: "2026-08-03",
       dateTimeOriginal: original,
       fileLastModified: new Date(2026, 6, 30, 12, 0),
@@ -42,7 +42,7 @@ describe("photo date suggestion", () => {
   it("uses EXIF CreateDate when the original capture date is missing", () => {
     const created = new Date(2026, 6, 29, 9, 0);
 
-    expect(suggestPhotoDate({
+    expect(suggestMediaDate({
       createDate: created,
       fileLastModified: new Date(2026, 6, 30, 12, 0),
       today: "2026-07-31"
@@ -56,7 +56,7 @@ describe("photo date suggestion", () => {
   it("falls back to the file modification date when EXIF is missing", () => {
     const modified = new Date(2026, 6, 30, 12, 0);
 
-    expect(suggestPhotoDate({
+    expect(suggestMediaDate({
       fileLastModified: modified,
       today: "2026-07-31"
     })).toEqual({

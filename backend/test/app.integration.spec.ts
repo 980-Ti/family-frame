@@ -7,7 +7,7 @@ import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module.js";
 import { PrismaService } from "../src/common/prisma.service.js";
-import { StorageService } from "../src/photos/storage.service.js";
+import { StorageService } from "../src/media/storage.service.js";
 
 const integration = process.env.RUN_INTEGRATION === "1";
 const onePixelPng = Buffer.from(
@@ -54,7 +54,7 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
     if (app) await app.close();
   });
 
-  it("migrates, authenticates, uploads, transforms, lists, and downloads a private photo", async () => {
+  it("migrates, authenticates, uploads, transforms, lists, and downloads a private media", async () => {
     await request(app.getHttpServer()).get("/api/health/ready").expect(200);
 
     const signup = await request(app.getHttpServer())
@@ -106,20 +106,20 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
     expect(upload.ok).toBe(true);
 
     const completed = await request(app.getHttpServer())
-      .post(`/api/photos/${start.body.photoId}/complete`)
+      .post(`/api/media/${start.body.mediaId}/complete`)
       .set("Cookie", sessionCookie);
     expect(completed.status, JSON.stringify(completed.body)).toBe(201);
     expect(completed.body.status).toBe("READY");
 
-    const photos = await request(app.getHttpServer())
-      .get(`/api/albums/${albumId}/photos?date=2026-08-02`)
+    const mediaItems = await request(app.getHttpServer())
+      .get(`/api/albums/${albumId}/media?date=2026-08-02`)
       .set("Cookie", sessionCookie)
       .expect(200);
-    expect(photos.body).toHaveLength(1);
-    expect(photos.body[0].id).toBe(start.body.photoId);
+    expect(mediaItems.body).toHaveLength(1);
+    expect(mediaItems.body[0].id).toBe(start.body.mediaId);
 
     const signed = await request(app.getHttpServer())
-      .get(`/api/photos/${start.body.photoId}/url?variant=thumbnail`)
+      .get(`/api/media/${start.body.mediaId}/url?variant=thumbnail`)
       .set("Cookie", sessionCookie)
       .expect(200);
     const thumbnail = await fetch(signed.body.url as string);
@@ -132,18 +132,18 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
       .set("Cookie", sessionCookie)
       .expect(204);
 
-    const photosAfterTagDelete = await request(app.getHttpServer())
-      .get(`/api/albums/${albumId}/photos?date=2026-08-02`)
+    const mediaItemsAfterTagDelete = await request(app.getHttpServer())
+      .get(`/api/albums/${albumId}/media?date=2026-08-02`)
       .set("Cookie", sessionCookie)
       .expect(200);
-    expect(photosAfterTagDelete.body).toHaveLength(1);
-    expect(photosAfterTagDelete.body[0]).toMatchObject({
-      id: start.body.photoId,
+    expect(mediaItemsAfterTagDelete.body).toHaveLength(1);
+    expect(mediaItemsAfterTagDelete.body[0]).toMatchObject({
+      id: start.body.mediaId,
       childTags: []
     });
 
     const signedAfterTagDelete = await request(app.getHttpServer())
-      .get(`/api/photos/${start.body.photoId}/url?variant=thumbnail`)
+      .get(`/api/media/${start.body.mediaId}/url?variant=thumbnail`)
       .set("Cookie", sessionCookie)
       .expect(200);
     expect((await fetch(signedAfterTagDelete.body.url as string)).ok).toBe(true);

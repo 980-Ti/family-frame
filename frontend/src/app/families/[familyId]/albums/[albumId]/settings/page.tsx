@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { AlbumSettings } from "@/components/album-settings";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { currentAlbumMonth } from "@/lib/photo-date";
+import { currentAlbumMonth } from "@/lib/media-date";
 import { protectedApi } from "@/lib/protected-api";
 import type { Family, FamilyMember } from "@/lib/types";
 

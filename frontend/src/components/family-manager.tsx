@@ -8,7 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clientApi } from "@/lib/api";
-import { currentAlbumMonth } from "@/lib/photo-date";
+import { currentAlbumMonth } from "@/lib/media-date";
 import type { Family } from "@/lib/types";
 
 export function FamilyManager({ families }: { families: Family[] }) {
@@ -62,8 +62,8 @@ export function FamilyManager({ families }: { families: Family[] }) {
           가족의 순간을<br />날짜별로 모아보세요
         </h1>
         <p className="muted mt-5 max-w-md text-base leading-7">
-          아이 이름을 여러 명 등록하고, 사진을 올릴 때 나온 아이를 직접 선택할 수 있어요.
-          사진은 초대한 가족과만 볼 수 있습니다.
+          아이 이름을 여러 명 등록하고, 사진이나 영상을 올릴 때 나온 아이를 직접 선택할 수 있어요.
+          사진과 영상은 초대한 가족과만 볼 수 있습니다.
         </p>
       </div>
 

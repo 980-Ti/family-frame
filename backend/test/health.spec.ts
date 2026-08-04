@@ -2,7 +2,7 @@ import { ServiceUnavailableException } from "@nestjs/common";
 import { describe, expect, it, vi } from "vitest";
 import { HealthController } from "../src/common/health.controller.js";
 import { PrismaService } from "../src/common/prisma.service.js";
-import { StorageService } from "../src/photos/storage.service.js";
+import { StorageService } from "../src/media/storage.service.js";
 
 describe("readiness", () => {
   it("checks the required database schema as well as storage", async () => {

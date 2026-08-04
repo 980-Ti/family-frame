@@ -1,19 +1,19 @@
 import { notFound, redirect } from "next/navigation";
 import { AlbumBrowserHeader } from "@/components/album-browser-header";
 import { ChildTagFilter } from "@/components/child-tag-filter";
-import { PhotoFeed } from "@/components/photo-feed";
+import { MediaFeed } from "@/components/media-feed";
 import {
-  parsePhotoFilter,
-  photoFilterApiParams,
-  photoFilterKey,
-  photoFilterPageParams
-} from "@/lib/photo-filter";
-import { currentAlbumMonth } from "@/lib/photo-date";
+  parseMediaFilter,
+  mediaFilterApiParams,
+  mediaFilterKey,
+  mediaFilterPageParams
+} from "@/lib/media-filter";
+import { currentAlbumMonth } from "@/lib/media-date";
 import { currentUser } from "@/lib/current-user";
 import { protectedApi } from "@/lib/protected-api";
-import type { Family, PhotoFeedPage } from "@/lib/types";
+import type { Family, MediaFeedPage } from "@/lib/types";
 
-export default async function PhotosPage({
+export default async function MediaPage({
   params,
   searchParams
 }: {
@@ -26,13 +26,13 @@ export default async function PhotosPage({
   }>;
 }) {
   const { familyId, albumId } = await params;
-  const filter = parsePhotoFilter(await searchParams);
-  const apiQuery = photoFilterApiParams(filter, { take: "40" });
-  const feedPath = `/albums/${albumId}/photo-feed?${apiQuery}`;
-  const pageQuery = photoFilterPageParams(filter).toString();
-  const returnTo = `/families/${familyId}/albums/${albumId}/photos${pageQuery ? `?${pageQuery}` : ""}`;
+  const filter = parseMediaFilter(await searchParams);
+  const apiQuery = mediaFilterApiParams(filter, { take: "40" });
+  const feedPath = `/albums/${albumId}/media-feed?${apiQuery}`;
+  const pageQuery = mediaFilterPageParams(filter).toString();
+  const returnTo = `/families/${familyId}/albums/${albumId}/media${pageQuery ? `?${pageQuery}` : ""}`;
   const [initialPage, families, user] = await Promise.all([
-    protectedApi<PhotoFeedPage>(feedPath, returnTo),
+    protectedApi<MediaFeedPage>(feedPath, returnTo),
     protectedApi<Family[]>("/families", returnTo),
     currentUser()
   ]);
@@ -45,14 +45,14 @@ export default async function PhotosPage({
     .filter((tag) => filter.childTagIds.includes(tag.id))
     .map((tag) => tag.name);
   const emptyTitle = filter.untagged
-    ? "태그 없는 사진이 없습니다"
+    ? "태그 없는 기록이 없습니다"
     : selectedNames.length > 1
       ? filter.match === "all"
-        ? `${selectedNames.join("·")}가 함께 나온 사진이 없습니다`
-        : `${selectedNames.join("·")} 중 선택한 아이가 나온 사진이 없습니다`
+        ? `${selectedNames.join("·")}가 함께 나온 기록이 없습니다`
+        : `${selectedNames.join("·")} 중 선택한 아이가 나온 기록이 없습니다`
       : selectedNames.length === 1
-        ? `${selectedNames[0]} 사진이 없습니다`
-        : "아직 앨범에 사진이 없습니다";
+        ? `${selectedNames[0]} 기록이 없습니다`
+        : "아직 앨범에 사진이나 영상이 없습니다";
   const month = currentAlbumMonth();
 
   return (
@@ -62,15 +62,15 @@ export default async function PhotosPage({
         album={album}
         month={month}
         filter={filter}
-        activeView="photos"
+        activeView="mediaItems"
       />
       <ChildTagFilter
-        baseHref={`/families/${familyId}/albums/${albumId}/photos`}
+        baseHref={`/families/${familyId}/albums/${albumId}/media`}
         childTags={album.childTags}
         filter={filter}
       />
-      <PhotoFeed
-        key={`${albumId}:${photoFilterKey(filter)}`}
+      <MediaFeed
+        key={`${albumId}:${mediaFilterKey(filter)}`}
         initialPage={initialPage}
         feedPath={feedPath}
         currentUserId={user.id}

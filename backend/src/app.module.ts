@@ -5,7 +5,7 @@ import { AlbumsModule } from "./albums/albums.module.js";
 import { AuthModule } from "./auth/auth.module.js";
 import { CommonModule } from "./common/common.module.js";
 import { FamiliesModule } from "./families/families.module.js";
-import { PhotosModule } from "./photos/photos.module.js";
+import { MediaModule } from "./media/media.module.js";
 import { HealthModule } from "./common/health.module.js";
 
 @Module({
@@ -15,7 +15,7 @@ import { HealthModule } from "./common/health.module.js";
     AuthModule,
     FamiliesModule,
     AlbumsModule,
-    PhotosModule,
+    MediaModule,
     HealthModule
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }]

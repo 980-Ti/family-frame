@@ -1,9 +1,9 @@
 import { Module } from "@nestjs/common";
-import { PhotosModule } from "../photos/photos.module.js";
+import { MediaModule } from "../media/media.module.js";
 import { HealthController } from "./health.controller.js";
 
 @Module({
-  imports: [PhotosModule],
+  imports: [MediaModule],
   controllers: [HealthController]
 })
 export class HealthModule {}

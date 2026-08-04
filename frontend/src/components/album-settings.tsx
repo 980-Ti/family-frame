@@ -148,7 +148,7 @@ export function AlbumSettings({
     <div className="space-y-8">
       <section>
         <h2 className="text-lg font-bold">아이 이름 태그</h2>
-        <p className="muted mt-2 text-sm">사진을 올릴 때 직접 선택할 이름이에요. 자동으로 판별하지 않습니다.</p>
+        <p className="muted mt-2 text-sm">사진이나 영상을 올릴 때 직접 선택할 이름이에요. 자동으로 판별하지 않습니다.</p>
         {visibleChildTags.length > 0 ? (
           <div className="mt-4 flex flex-wrap gap-2">
             {visibleChildTags.map((tag) => (
@@ -171,7 +171,7 @@ export function AlbumSettings({
                   <AlertDialogHeader>
                     <AlertDialogTitle>&ldquo;{tag.name}&rdquo; 이름표를 삭제할까요?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      사진은 삭제되지 않고 이 이름표만 제거됩니다.
+                      사진과 영상은 삭제되지 않고 이 이름표만 제거됩니다.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>
@@ -292,7 +292,7 @@ export function AlbumSettings({
                     <AlertDialogHeader>
                       <AlertDialogTitle>&ldquo;{member.user.displayName}&rdquo;님을 내보낼까요?</AlertDialogTitle>
                       <AlertDialogDescription>
-                        이 사용자는 앨범과 사진에 더 이상 접근할 수 없습니다. 올린 사진은 삭제되지 않습니다.
+                        이 사용자는 앨범의 사진과 영상에 더 이상 접근할 수 없습니다. 올린 파일은 삭제되지 않습니다.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>

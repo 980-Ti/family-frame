@@ -1,17 +1,17 @@
-export type PhotoDateSource =
+export type MediaDateSource =
   | "EXIF_ORIGINAL"
   | "EXIF_CREATED"
   | "FILE_MODIFIED"
   | "USER"
   | "DEFAULT";
 
-export type PhotoDateSuggestion = {
+export type MediaDateSuggestion = {
   albumDate: string;
   capturedAt: string | null;
-  dateSource: PhotoDateSource;
+  dateSource: MediaDateSource;
 };
 
-type PhotoDateInput = {
+type MediaDateInput = {
   defaultDate?: string;
   dateTimeOriginal?: Date;
   createDate?: Date;
@@ -41,7 +41,7 @@ export function currentAlbumMonth(value = new Date()): string {
   return `${year}-${month}`;
 }
 
-export function suggestPhotoDate(input: PhotoDateInput): PhotoDateSuggestion {
+export function suggestMediaDate(input: MediaDateInput): MediaDateSuggestion {
   const exif = isValidDate(input.dateTimeOriginal)
     ? { date: input.dateTimeOriginal, source: "EXIF_ORIGINAL" as const }
     : isValidDate(input.createDate)

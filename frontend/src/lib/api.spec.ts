@@ -27,7 +27,7 @@ describe("client API requests", () => {
     const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(timeoutSignal);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null, { status: 204 }));
 
-    await clientApi<void>("/photos/photo-1/complete", { method: "POST" }, 120_000);
+    await clientApi<void>("/media/media-1/complete", { method: "POST" }, 120_000);
 
     expect(timeout).toHaveBeenCalledWith(120_000);
   });
@@ -38,7 +38,7 @@ describe("client API requests", () => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
     }));
 
-    const request = clientApi("/photos/photo-1/url", { signal: caller.signal });
+    const request = clientApi("/media/media-1/url", { signal: caller.signal });
     caller.abort();
 
     await expect(request).rejects.toThrow("서버에 연결하지 못했습니다");

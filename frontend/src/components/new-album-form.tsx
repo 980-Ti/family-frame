@@ -9,7 +9,7 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { clientApi } from "@/lib/api";
-import { currentAlbumMonth } from "@/lib/photo-date";
+import { currentAlbumMonth } from "@/lib/media-date";
 
 function mergeChildName(names: string[], value: string) {
   const name = value.trim();
@@ -49,7 +49,7 @@ export function NewAlbumForm({ familyId }: { familyId: string }) {
     try {
       const names = mergeChildName(childNames, childInput);
       if (!names.length) {
-        setError("사진을 구분할 아이 이름을 한 명 이상 추가해주세요.");
+        setError("사진과 영상을 구분할 아이 이름을 한 명 이상 추가해주세요.");
         return;
       }
       setPending(true);
@@ -116,10 +116,10 @@ export function NewAlbumForm({ familyId }: { familyId: string }) {
               className="block font-bold"
               htmlFor="newAlbumChildName"
             >
-              사진에서 구분할 아이
+              사진·영상에서 구분할 아이
             </Label>
               <p className="muted mt-1 text-[15px] leading-6" id="childNameHelp">
-              사진을 올릴 때 직접 고르는 태그입니다. 이름을 한 명씩
+              사진이나 영상을 올릴 때 직접 고르는 태그입니다. 이름을 한 명씩
               추가해주세요.
             </p>
 

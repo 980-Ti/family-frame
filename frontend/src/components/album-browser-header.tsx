@@ -10,9 +10,9 @@ import {
   DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu";
 import {
-  photoFilterPageParams,
-  type PhotoFilterState
-} from "@/lib/photo-filter";
+  mediaFilterPageParams,
+  type MediaFilterState
+} from "@/lib/media-filter";
 import type { Album, Family } from "@/lib/types";
 import { LinkPendingIndicator } from "./link-pending-indicator";
 
@@ -26,11 +26,11 @@ export function AlbumBrowserHeader({
   family: Family;
   album: Album;
   month: string;
-  filter: PhotoFilterState;
-  activeView: "calendar" | "photos";
+  filter: MediaFilterState;
+  activeView: "calendar" | "mediaItems";
 }) {
-  const calendarQuery = photoFilterPageParams(filter, { month }).toString();
-  const photosQuery = photoFilterPageParams(filter).toString();
+  const calendarQuery = mediaFilterPageParams(filter, { month }).toString();
+  const mediaItemsQuery = mediaFilterPageParams(filter).toString();
   const isOwner = family.members[0]?.role === "OWNER";
 
   return (
@@ -101,10 +101,10 @@ export function AlbumBrowserHeader({
               <LinkPendingIndicator />
             </Link>
           </Button>
-          <Button asChild variant="ghost" size="sm" className="album-view-control" data-active={activeView === "photos"}>
+          <Button asChild variant="ghost" size="sm" className="album-view-control" data-active={activeView === "mediaItems"}>
             <Link
-              href={`/families/${family.id}/albums/${album.id}/photos${photosQuery ? `?${photosQuery}` : ""}`}
-              aria-current={activeView === "photos" ? "page" : undefined}
+              href={`/families/${family.id}/albums/${album.id}/media${mediaItemsQuery ? `?${mediaItemsQuery}` : ""}`}
+              aria-current={activeView === "mediaItems" ? "page" : undefined}
             >
               <Images aria-hidden="true" />
               모아보기
@@ -123,7 +123,7 @@ export function AlbumBrowserHeader({
         <Button asChild size="sm">
           <Link href={`/families/${family.id}/albums/${album.id}/upload`}>
             <Upload aria-hidden="true" />
-            사진 올리기
+            사진·영상 올리기
           </Link>
         </Button>
       </div>

@@ -4,30 +4,30 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import type { Photo } from "@/lib/types";
+import type { Media } from "@/lib/types";
 
 const clientApiMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api", () => ({ clientApi: clientApiMock }));
 
-vi.mock("./photo-gallery", () => ({
-  PhotoGallery: ({
-    photos,
-    onPhotoRemoved
+vi.mock("./media-gallery", () => ({
+  MediaGallery: ({
+    mediaItems,
+    onMediaRemoved
   }: {
-    photos: Photo[];
-    onPhotoRemoved?: (photoId: string) => void;
+    mediaItems: Media[];
+    onMediaRemoved?: (mediaId: string) => void;
   }) => (
     <div data-testid="gallery">
-      <span data-photo-ids>{photos.map(({ id }) => id).join(",")}</span>
-      <button type="button" onClick={() => onPhotoRemoved?.("old")}>delete</button>
+      <span data-media-ids>{mediaItems.map(({ id }) => id).join(",")}</span>
+      <button type="button" onClick={() => onMediaRemoved?.("old")}>delete</button>
     </div>
   )
 }));
 
-import { appendUniquePhotos, PhotoFeed } from "./photo-feed";
+import { appendUniqueMedia, MediaFeed } from "./media-feed";
 
-function photo(id: string): Photo {
+function media(id: string): Media {
   return {
     id,
     albumDate: "2026-08-03",
@@ -39,17 +39,17 @@ function photo(id: string): Photo {
   };
 }
 
-describe("PhotoFeed", () => {
-  it("appends cursor pages without retaining duplicate photos", () => {
-    expect(appendUniquePhotos([photo("1"), photo("2")], [photo("2"), photo("3")]).map(({ id }) => id))
+describe("MediaFeed", () => {
+  it("appends cursor pages without retaining duplicate mediaItems", () => {
+    expect(appendUniqueMedia([media("1"), media("2")], [media("2"), media("3")]).map(({ id }) => id))
       .toEqual(["1", "2", "3"]);
   });
 
   it("renders an automatic loading sentinel instead of a load-more button", () => {
     const markup = renderToStaticMarkup(
-      <PhotoFeed
-        initialPage={{ items: [photo("1")], nextCursor: "next" }}
-        feedPath="/albums/album-1/photo-feed?take=40"
+      <MediaFeed
+        initialPage={{ items: [media("1")], nextCursor: "next" }}
+        feedPath="/albums/album-1/media-feed?take=40"
         currentUserId="user-1"
         canDeleteAll
         uploadHref="/upload"
@@ -57,17 +57,17 @@ describe("PhotoFeed", () => {
       />
     );
 
-    expect(markup).toContain("data-photo-feed-sentinel");
+    expect(markup).toContain("data-media-feed-sentinel");
     expect(markup).not.toContain("사진 더 보기");
   });
 
-  it("refills the first page after deleting the last loaded cursor photo", async () => {
+  it("refills the first page after deleting the last loaded cursor media", async () => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    clientApiMock.mockResolvedValueOnce({ items: [photo("older")], nextCursor: null });
+    clientApiMock.mockResolvedValueOnce({ items: [media("older")], nextCursor: null });
     const container = document.createElement("div");
     const root = createRoot(container);
     const props = {
-      feedPath: "/albums/album-1/photo-feed?take=40",
+      feedPath: "/albums/album-1/media-feed?take=40",
       currentUserId: "user-1",
       canDeleteAll: true,
       uploadHref: "/upload",
@@ -75,15 +75,15 @@ describe("PhotoFeed", () => {
     };
 
     await act(async () => root.render(
-      <PhotoFeed initialPage={{ items: [photo("old")], nextCursor: "old" }} {...props} />
+      <MediaFeed initialPage={{ items: [media("old")], nextCursor: "old" }} {...props} />
     ));
     await act(async () => {
       container.querySelector("button")?.click();
     });
 
     expect(clientApiMock).toHaveBeenCalledWith(props.feedPath);
-    expect(container.querySelector("[data-photo-ids]")?.textContent).toBe("older");
-    expect(container.querySelector("[data-photo-feed-sentinel]")).toBeNull();
+    expect(container.querySelector("[data-media-ids]")?.textContent).toBe("older");
+    expect(container.querySelector("[data-media-feed-sentinel]")).toBeNull();
     act(() => root.unmount());
   });
 });

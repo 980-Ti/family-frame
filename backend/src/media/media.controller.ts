@@ -3,28 +3,28 @@ import { Throttle } from "@nestjs/throttler";
 import { CurrentUser } from "../auth/current-user.decorator.js";
 import { SessionGuard } from "../auth/session.guard.js";
 import type { AuthUser } from "../auth/auth.types.js";
-import { parsePhotoFilter } from "../common/photo-filter.js";
-import { PhotosService } from "./photos.service.js";
-import { RepresentativeDto, StartUploadDto } from "./photos.dto.js";
+import { parseMediaFilter } from "../common/media-filter.js";
+import { MediaService } from "./media.service.js";
+import { RepresentativeDto, StartUploadDto } from "./media.dto.js";
 
 @Controller()
 @UseGuards(SessionGuard)
-export class PhotosController {
-  constructor(private readonly photos: PhotosService) {}
+export class MediaController {
+  constructor(private readonly mediaItems: MediaService) {}
 
   @Post("albums/:albumId/uploads")
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   start(@CurrentUser() user: AuthUser, @Param("albumId") albumId: string, @Body() dto: StartUploadDto) {
-    return this.photos.startUpload(user.id, albumId, dto);
+    return this.mediaItems.startUpload(user.id, albumId, dto);
   }
 
-  @Post("photos/:photoId/complete")
+  @Post("mediaItems/:mediaId/complete")
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
-  complete(@CurrentUser() user: AuthUser, @Param("photoId") photoId: string) {
-    return this.photos.complete(user.id, photoId);
+  complete(@CurrentUser() user: AuthUser, @Param("mediaId") mediaId: string) {
+    return this.mediaItems.complete(user.id, mediaId);
   }
 
-  @Get("albums/:albumId/photos")
+  @Get("albums/:albumId/media")
   list(
     @CurrentUser() user: AuthUser,
     @Param("albumId") albumId: string,
@@ -34,15 +34,15 @@ export class PhotosController {
     @Query("match") match?: string,
     @Query("untagged") untagged?: string
   ) {
-    return this.photos.list(
+    return this.mediaItems.list(
       user.id,
       albumId,
       date,
-      parsePhotoFilter({ childTagId, childTagIds, match, untagged })
+      parseMediaFilter({ childTagId, childTagIds, match, untagged })
     );
   }
 
-  @Get("albums/:albumId/photo-feed")
+  @Get("albums/:albumId/media-feed")
   feed(
     @CurrentUser() user: AuthUser,
     @Param("albumId") albumId: string,
@@ -53,22 +53,22 @@ export class PhotosController {
     @Query("cursor") cursor?: string,
     @Query("take") take?: string
   ) {
-    return this.photos.feed(
+    return this.mediaItems.feed(
       user.id,
       albumId,
-      parsePhotoFilter({ childTagId, childTagIds, match, untagged }),
+      parseMediaFilter({ childTagId, childTagIds, match, untagged }),
       cursor,
       take ? Number(take) : undefined
     );
   }
 
-  @Get("photos/:photoId/url")
+  @Get("mediaItems/:mediaId/url")
   url(
     @CurrentUser() user: AuthUser,
-    @Param("photoId") photoId: string,
+    @Param("mediaId") mediaId: string,
     @Query("variant") variant: "thumbnail" | "display" | "original" = "display"
   ) {
-    return this.photos.url(user.id, photoId, variant);
+    return this.mediaItems.url(user.id, mediaId, variant);
   }
 
   @Put("albums/:albumId/dates/:date/representative")
@@ -78,11 +78,11 @@ export class PhotosController {
     @Param("date") date: string,
     @Body() dto: RepresentativeDto
   ) {
-    return this.photos.setRepresentative(user.id, albumId, date, dto.photoId);
+    return this.mediaItems.setRepresentative(user.id, albumId, date, dto.mediaId);
   }
 
-  @Delete("photos/:photoId")
-  remove(@CurrentUser() user: AuthUser, @Param("photoId") photoId: string) {
-    return this.photos.remove(user.id, photoId);
+  @Delete("mediaItems/:mediaId")
+  remove(@CurrentUser() user: AuthUser, @Param("mediaId") mediaId: string) {
+    return this.mediaItems.remove(user.id, mediaId);
   }
 }

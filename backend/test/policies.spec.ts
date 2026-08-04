@@ -1,21 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { assertDailyPhotoCapacity, canDeletePhoto } from "../src/photos/policies.js";
+import { assertDailyMediaCapacity, canDeleteMedia } from "../src/media/policies.js";
 
-describe("photo policies", () => {
-  it("rejects an eleventh active photo for the same date", () => {
+describe("media policies", () => {
+  it("rejects an eleventh active media for the same date", () => {
     try {
-      assertDailyPhotoCapacity(10);
+      assertDailyMediaCapacity(10);
       throw new Error("expected daily limit rejection");
     } catch (error) {
       expect((error as { getResponse(): unknown }).getResponse()).toMatchObject({
-        code: "DAILY_PHOTO_LIMIT"
+        code: "DAILY_MEDIA_LIMIT"
       });
     }
   });
 
-  it("lets owners delete any photo and members only their own", () => {
-    expect(canDeletePhoto("OWNER", "owner", "member")).toBe(true);
-    expect(canDeletePhoto("MEMBER", "member", "member")).toBe(true);
-    expect(canDeletePhoto("MEMBER", "member", "other")).toBe(false);
+  it("lets owners delete any media and members only their own", () => {
+    expect(canDeleteMedia("OWNER", "owner", "member")).toBe(true);
+    expect(canDeleteMedia("MEMBER", "member", "member")).toBe(true);
+    expect(canDeleteMedia("MEMBER", "member", "other")).toBe(false);
   });
 });

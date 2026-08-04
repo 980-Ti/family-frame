@@ -5,11 +5,11 @@ import { MonthNavigator } from "@/components/month-navigator";
 import { MonthCalendar } from "@/components/month-calendar";
 import { Card } from "@/components/ui/card";
 import {
-  parsePhotoFilter,
-  photoFilterApiParams,
-  photoFilterPageParams
-} from "@/lib/photo-filter";
-import { currentAlbumMonth } from "@/lib/photo-date";
+  parseMediaFilter,
+  mediaFilterApiParams,
+  mediaFilterPageParams
+} from "@/lib/media-filter";
+import { currentAlbumMonth } from "@/lib/media-date";
 import { protectedApi } from "@/lib/protected-api";
 import type { CalendarDay, Family } from "@/lib/types";
 
@@ -29,9 +29,9 @@ export default async function CalendarPage({
   const { familyId, albumId } = await params;
   const query = await searchParams;
   const month = query.month ?? currentAlbumMonth();
-  const filter = parsePhotoFilter(query);
-  const apiQuery = photoFilterApiParams(filter, { month });
-  const returnTo = `/families/${familyId}/albums/${albumId}/calendar?${photoFilterPageParams(filter, { month })}`;
+  const filter = parseMediaFilter(query);
+  const apiQuery = mediaFilterApiParams(filter, { month });
+  const returnTo = `/families/${familyId}/albums/${albumId}/calendar?${mediaFilterPageParams(filter, { month })}`;
   const [days, families] = await Promise.all([
     protectedApi<CalendarDay[]>(`/albums/${albumId}/calendar?${apiQuery}`, returnTo),
     protectedApi<Family[]>("/families", returnTo)
@@ -42,7 +42,7 @@ export default async function CalendarPage({
   const current = new Date(`${month}-01T00:00:00Z`);
   const previous = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() - 1, 1)).toISOString().slice(0, 7);
   const next = new Date(Date.UTC(current.getUTCFullYear(), current.getUTCMonth() + 1, 1)).toISOString().slice(0, 7);
-  const filterQuery = photoFilterPageParams(filter).toString();
+  const filterQuery = mediaFilterPageParams(filter).toString();
 
   return (
     <section>

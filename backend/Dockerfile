@@ -23,7 +23,7 @@ ENV PORT=4000
 
 WORKDIR /app
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl \
+  && apt-get install -y --no-install-recommends ffmpeg openssl \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=build --chown=node:node /runtime ./
 COPY --from=build --chown=node:node /workspace/backend/dist ./dist

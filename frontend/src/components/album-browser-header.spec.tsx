@@ -24,6 +24,6 @@ describe("album browser permissions", () => {
 
     expect(markup).not.toContain("새 앨범");
     expect(markup).not.toContain("앨범 설정");
-    expect(markup).toContain("사진 올리기");
+    expect(markup).toContain("사진·영상 올리기");
   });
 });

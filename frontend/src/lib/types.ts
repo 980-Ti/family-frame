@@ -32,20 +32,20 @@ export type ChildTag = {
 export type CalendarDay = {
   date: string;
   count: number;
-  representativePhotoId: string | null;
+  representativeMediaId: string | null;
 };
 
-export type Photo = {
+export type Media = {
   id: string;
   albumDate: string;
   originalName: string;
   uploadedById: string;
   createdAt: string;
-  mediaAsset: { width: number; height: number };
+  mediaAsset: { width: number; height: number; mimeType?: string };
   childTags: ChildTag[];
 };
 
-export type PhotoFeedPage = {
-  items: Photo[];
+export type MediaFeedPage = {
+  items: Media[];
   nextCursor: string | null;
 };

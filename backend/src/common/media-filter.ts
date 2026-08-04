@@ -1,19 +1,19 @@
 import { BadRequestException } from "@nestjs/common";
 import type { Prisma } from "../generated/prisma/client.js";
 
-export type PhotoFilter = {
+export type MediaFilter = {
   childTagIds: string[];
   match: "any" | "all";
   untagged: boolean;
 };
 
-export const EMPTY_PHOTO_FILTER: PhotoFilter = {
+export const EMPTY_MEDIA_FILTER: MediaFilter = {
   childTagIds: [],
   match: "any",
   untagged: false
 };
 
-export function parsePhotoFilter({
+export function parseMediaFilter({
   childTagId,
   childTagIds,
   match,
@@ -23,7 +23,7 @@ export function parsePhotoFilter({
   childTagIds?: string;
   match?: string;
   untagged?: string;
-}): PhotoFilter {
+}): MediaFilter {
   const ids = [...new Set([
     ...(childTagIds?.split(",") ?? []),
     ...(childTagId ? [childTagId] : [])
@@ -31,8 +31,8 @@ export function parsePhotoFilter({
 
   if (ids.length > 10 || (match && match !== "any" && match !== "all")) {
     throw new BadRequestException({
-      code: "INVALID_PHOTO_FILTER",
-      message: "사진 필터가 올바르지 않습니다."
+      code: "INVALID_MEDIA_FILTER",
+      message: "미디어 필터가 올바르지 않습니다."
     });
   }
 
@@ -44,7 +44,7 @@ export function parsePhotoFilter({
   };
 }
 
-export function photoFilterWhere(filter: PhotoFilter): Prisma.PhotoWhereInput {
+export function mediaFilterWhere(filter: MediaFilter): Prisma.MediaWhereInput {
   if (filter.untagged) return { childTags: { none: {} } };
   if (!filter.childTagIds.length) return {};
   if (filter.match === "all") {

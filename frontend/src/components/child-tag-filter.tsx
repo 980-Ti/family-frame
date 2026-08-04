@@ -2,9 +2,9 @@ import Link from "next/link";
 import { Baby, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
-  photoFilterPageParams,
-  type PhotoFilterState
-} from "@/lib/photo-filter";
+  mediaFilterPageParams,
+  type MediaFilterState
+} from "@/lib/media-filter";
 import type { ChildTag } from "@/lib/types";
 import { LinkPendingIndicator } from "./link-pending-indicator";
 
@@ -16,13 +16,13 @@ export function ChildTagFilter({
 }: {
   baseHref: string;
   childTags: ChildTag[];
-  filter: PhotoFilterState;
+  filter: MediaFilterState;
   searchParams?: Record<string, string>;
 }) {
   if (!childTags.length) return null;
 
-  function href(nextFilter: PhotoFilterState) {
-    const params = photoFilterPageParams(nextFilter, searchParams);
+  function href(nextFilter: MediaFilterState) {
+    const params = mediaFilterPageParams(nextFilter, searchParams);
     const query = params.toString();
     return `${baseHref}${query ? `?${query}` : ""}`;
   }
@@ -31,7 +31,7 @@ export function ChildTagFilter({
   const filtered = !allSelected;
 
   return (
-    <nav className="child-filter" aria-label="아이 이름으로 사진 필터">
+    <nav className="child-filter" aria-label="아이 이름으로 사진과 영상 필터">
       <div className="child-filter-main">
         <span className="child-filter-label" title="아이 필터">
           <Baby aria-hidden="true" />
@@ -41,7 +41,7 @@ export function ChildTagFilter({
           <Button asChild variant="ghost" size="sm" className="filter-tag" data-selected={allSelected}>
             <Link
               href={href({ childTagIds: [], match: "any", untagged: false })}
-              aria-label={`전체 사진${allSelected ? ", 선택됨" : ""}`}
+              aria-label={`전체 기록${allSelected ? ", 선택됨" : ""}`}
             >
               {allSelected ? <Check aria-hidden="true" /> : null}
               전체
@@ -62,7 +62,7 @@ export function ChildTagFilter({
                     match: childTagIds.length > 1 ? filter.match : "any",
                     untagged: false
                   })}
-                  aria-label={`${tag.name} 사진${selected ? ", 선택됨" : ""}`}
+                  aria-label={`${tag.name} 기록${selected ? ", 선택됨" : ""}`}
                 >
                   {selected ? <Check aria-hidden="true" /> : null}
                   <span className="truncate">{tag.name}</span>
@@ -75,7 +75,7 @@ export function ChildTagFilter({
           <Button asChild variant="ghost" size="sm" className="filter-tag" data-selected={filter.untagged}>
             <Link
               href={href({ childTagIds: [], match: "any", untagged: true })}
-              aria-label={`태그 없는 사진${filter.untagged ? ", 선택됨" : ""}`}
+              aria-label={`태그 없는 기록${filter.untagged ? ", 선택됨" : ""}`}
             >
               {filter.untagged ? <Check aria-hidden="true" /> : null}
               태그 없음
@@ -91,7 +91,7 @@ export function ChildTagFilter({
                 className="filter-condition-control"
                 data-selected={filter.match === "any"}
                 href={href({ ...filter, match: "any" })}
-                aria-label="선택한 아이가 한 명 이상 나온 사진"
+                aria-label="선택한 아이가 한 명 이상 나온 기록"
               >
                 한 명 이상
                 <LinkPendingIndicator />
@@ -100,7 +100,7 @@ export function ChildTagFilter({
                 className="filter-condition-control"
                 data-selected={filter.match === "all"}
                 href={href({ ...filter, match: "all" })}
-                aria-label="선택한 아이가 모두 함께 나온 사진"
+                aria-label="선택한 아이가 모두 함께 나온 기록"
               >
                 모두 포함
                 <LinkPendingIndicator />
