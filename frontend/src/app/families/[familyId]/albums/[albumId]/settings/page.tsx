@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { currentAlbumMonth } from "@/lib/photo-date";
 import { protectedApi } from "@/lib/protected-api";
-import type { Family } from "@/lib/types";
+import type { Family, FamilyMember } from "@/lib/types";
 
 export default async function SettingsPage({
   params
@@ -19,6 +19,11 @@ export default async function SettingsPage({
   const family = families.find((item) => item.id === familyId);
   const album = family?.albums.find((item) => item.id === albumId);
   if (!family || !album) notFound();
+
+  const isOwner = family.members[0]?.role === "OWNER";
+  const members = isOwner
+    ? await protectedApi<FamilyMember[]>(`/families/${familyId}/members`, returnTo)
+    : [];
 
   const month = currentAlbumMonth();
 
@@ -33,7 +38,7 @@ export default async function SettingsPage({
       <div className="mt-6">
         <p className="eyebrow mb-2">앨범 설정</p>
         <h1 className="brand text-3xl font-extrabold">{album.name}</h1>
-        <p className="muted mt-2 text-base">아이 이름 태그와 가족 초대를 관리하세요.</p>
+        <p className="muted mt-2 text-base">아이 이름 태그와 가족 구성원을 관리하세요.</p>
       </div>
       <Card className="mt-8 rounded-2xl">
         <CardContent className="p-5 sm:p-7">
@@ -41,7 +46,8 @@ export default async function SettingsPage({
             familyId={familyId}
             albumId={albumId}
             childTags={album.childTags}
-            isOwner={family.members[0]?.role === "OWNER"}
+            members={members}
+            isOwner={isOwner}
           />
         </CardContent>
       </Card>

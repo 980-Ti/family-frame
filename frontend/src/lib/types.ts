@@ -5,6 +5,17 @@ export type Family = {
   albums: Album[];
 };
 
+export type FamilyMember = {
+  id: string;
+  role: "OWNER" | "MEMBER";
+  createdAt: string;
+  user: {
+    id: string;
+    email: string;
+    displayName: string;
+  };
+};
+
 export type Album = {
   id: string;
   familyId: string;

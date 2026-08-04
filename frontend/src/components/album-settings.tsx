@@ -2,7 +2,7 @@
 
 import { FormEvent, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { X } from "lucide-react";
+import { UserMinus, X } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -21,22 +21,25 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { clientApi } from "@/lib/api";
-import type { ChildTag } from "@/lib/types";
+import type { ChildTag, FamilyMember } from "@/lib/types";
 
 export function AlbumSettings({
   familyId,
   albumId,
   childTags,
+  members,
   isOwner
 }: {
   familyId: string;
   albumId: string;
   childTags: ChildTag[];
+  members: FamilyMember[];
   isOwner: boolean;
 }) {
   const router = useRouter();
   const tagPendingRef = useRef(false);
   const invitePendingRef = useRef(false);
+  const memberPendingRef = useRef(false);
   const [tagError, setTagError] = useState("");
   const [tagPending, setTagPending] = useState(false);
   const [deletingTagId, setDeletingTagId] = useState<string | null>(null);
@@ -44,7 +47,11 @@ export function AlbumSettings({
   const [inviteError, setInviteError] = useState("");
   const [inviteLink, setInviteLink] = useState("");
   const [invitePending, setInvitePending] = useState(false);
+  const [memberError, setMemberError] = useState("");
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null);
+  const [removedMemberIds, setRemovedMemberIds] = useState<string[]>([]);
   const visibleChildTags = childTags.filter((tag) => !removedTagIds.includes(tag.id));
+  const visibleMembers = members.filter((member) => !removedMemberIds.includes(member.id));
   const childTagLimitReached = visibleChildTags.length >= 10;
 
   async function createChildTag(event: FormEvent<HTMLFormElement>) {
@@ -113,8 +120,28 @@ export function AlbumSettings({
     }
   }
 
+  async function removeMember(member: FamilyMember) {
+    if (member.role === "OWNER" || memberPendingRef.current) return;
+
+    memberPendingRef.current = true;
+    setMemberError("");
+    setRemovingMemberId(member.id);
+    try {
+      await clientApi<void>(`/families/${familyId}/members/${member.id}`, {
+        method: "DELETE"
+      });
+      setRemovedMemberIds((current) => [...current, member.id]);
+      router.refresh();
+    } catch (reason) {
+      setMemberError(reason instanceof Error ? reason.message : "가족 구성원을 내보내지 못했습니다.");
+    } finally {
+      memberPendingRef.current = false;
+      setRemovingMemberId(null);
+    }
+  }
+
   if (!isOwner) {
-    return <p className="muted text-sm">앨범 초대는 앨범을 만든 사람만 관리할 수 있어요.</p>;
+    return <p className="muted text-sm">가족 구성원 관리는 앨범을 만든 사람만 할 수 있어요.</p>;
   }
 
   return (
@@ -221,6 +248,74 @@ export function AlbumSettings({
           </Alert>
         ) : null}
       </form>
+
+      <Separator />
+      <section>
+        <h2 className="text-lg font-bold">가족 구성원</h2>
+        <p className="muted mt-2 text-sm">이 앨범을 함께 볼 수 있는 가족이에요.</p>
+        <div className="mt-4 space-y-2">
+          {visibleMembers.map((member) => (
+            <div
+              key={member.id}
+              className="flex min-w-0 items-center gap-3 rounded-xl bg-secondary/50 px-3 py-3 sm:px-4"
+            >
+              <span
+                aria-hidden="true"
+                className="grid size-9 shrink-0 place-items-center rounded-full bg-background text-sm font-bold"
+              >
+                {member.user.displayName.charAt(0)}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate font-semibold" title={member.user.displayName}>
+                    {member.user.displayName}
+                  </span>
+                  {member.role === "OWNER" ? <Badge variant="secondary">대표</Badge> : null}
+                </div>
+                <p className="muted truncate text-sm" title={member.user.email}>{member.user.email}</p>
+              </div>
+              {member.role === "MEMBER" ? (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="shrink-0 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                      aria-label={`${member.user.displayName} 가족에서 내보내기`}
+                      disabled={removingMemberId !== null}
+                    >
+                      <UserMinus aria-hidden="true" />
+                      <span className="hidden sm:inline">내보내기</span>
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>&ldquo;{member.user.displayName}&rdquo;님을 내보낼까요?</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        이 사용자는 앨범과 사진에 더 이상 접근할 수 없습니다. 올린 사진은 삭제되지 않습니다.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>취소</AlertDialogCancel>
+                      <AlertDialogAction
+                        disabled={removingMemberId !== null}
+                        onClick={() => void removeMember(member)}
+                      >
+                        내보내기
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              ) : null}
+            </div>
+          ))}
+        </div>
+        {memberError ? (
+          <Alert variant="destructive" className="mt-4" role="alert" aria-live="polite">
+            <AlertDescription>{memberError}</AlertDescription>
+          </Alert>
+        ) : null}
+      </section>
     </div>
   );
 }
