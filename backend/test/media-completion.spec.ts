@@ -34,6 +34,8 @@ describe("media completion recovery", () => {
       albumDate: new Date("2026-08-03T00:00:00.000Z"),
       uploadedById: "user-1",
       originalName: "baby.mp4",
+      uploadContentType: "video/mp4",
+      uploadSize: 3,
       tempObjectKey: "temp/family-1/video-1",
       mediaAssetId: null as string | null,
       status: "PENDING_UPLOAD",
@@ -79,8 +81,16 @@ describe("media completion recovery", () => {
     } as unknown as PrismaService;
     const albums = { requireAlbum: async () => ({ album: media.album }) } as unknown as AlbumsService;
     const put = vi.fn(async () => undefined);
+    const copy = vi.fn(async () => undefined);
+    const cleanup = vi.fn(async () => undefined);
     const storage = {
-      read: async () => ({ bytes: Buffer.from("mp4"), contentType: "video/mp4" }),
+      readVideo: async () => ({
+        path: "input.mp4",
+        sha256: "hash",
+        contentType: "video/mp4",
+        cleanup
+      }),
+      copy,
       put,
       delete: async () => undefined
     } as unknown as StorageService;
@@ -94,7 +104,9 @@ describe("media completion recovery", () => {
     await expect(new MediaService(prisma, albums, storage).complete("user-1", media.id))
       .resolves.toEqual({ mediaId: media.id, status: "READY" });
     expect(asset).toMatchObject({ mimeType: "video/mp4", width: 1920, height: 1080 });
-    expect(put).toHaveBeenCalledTimes(2);
+    expect(copy).toHaveBeenCalledTimes(1);
+    expect(put).toHaveBeenCalledTimes(1);
+    expect(cleanup).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a partially written media asset linked for retry or deletion", async () => {
@@ -706,7 +718,7 @@ describe("media completion recovery", () => {
     });
   });
 
-  it("keeps a failed temp cleanup recoverable on the next completion", async () => {
+  it("logs cleanup failures and keeps a failed temp cleanup recoverable on the next completion", async () => {
     const media = {
       id: "media-1",
       albumId: "album-1",
@@ -740,6 +752,7 @@ describe("media completion recovery", () => {
     const families = new FamiliesService(prisma);
     const albums = new AlbumsService(prisma, families);
     const mediaItems = new MediaService(prisma, albums, storage);
+    const warn = vi.spyOn((mediaItems as unknown as { logger: { warn: (...args: unknown[]) => void } }).logger, "warn");
 
     const firstFailure = await mediaItems.complete("user-1", "media-1").then(
       () => null,
@@ -748,6 +761,7 @@ describe("media completion recovery", () => {
     expect((firstFailure as ServiceUnavailableException).getResponse()).toMatchObject({
       code: "MEDIA_CLEANUP_FAILED"
     });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("임시 객체 정리 실패"));
     await expect(mediaItems.complete("user-1", "media-1")).resolves.toEqual({
       mediaId: "media-1",
       status: "READY"
@@ -933,7 +947,7 @@ describe("media completion recovery", () => {
     });
   });
 
-  it("limits concurrent image processing to two mediaItems", async () => {
+  it("limits concurrent processing to two media files", async () => {
     const pending = Array.from({ length: 3 }, () => {
       let reject!: (reason: Error) => void;
       const promise = new Promise<never>((_, rejectPromise) => { reject = rejectPromise; });
@@ -1095,6 +1109,56 @@ describe("media upload idempotency", () => {
     });
   });
 
+  it("rejects an upload id reused with a different content type", async () => {
+    const existing = {
+      id: "media-1",
+      albumId: "album-1",
+      albumDate: new Date("2026-08-03T00:00:00.000Z"),
+      uploadedById: "user-1",
+      originalName: "baby.mp4",
+      uploadContentType: "video/mp4",
+      uploadSize: 1024,
+      status: "PENDING_UPLOAD",
+      tempObjectKey: "temp/family-1/media-1",
+      capturedAt: null,
+      dateSource: "USER",
+      childTags: []
+    };
+    const prisma = {
+      album: {
+        findUnique: async () => ({ id: "album-1", familyId: "family-1", name: "우리의 여름" })
+      },
+      familyMember: {
+        findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
+      },
+      $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+        $executeRaw: async () => undefined,
+        media: { findUnique: async () => existing }
+      })
+    } as unknown as PrismaService;
+    const storage = {
+      presignUpload: vi.fn(async () => "https://storage.example/upload")
+    } as unknown as StorageService;
+    const families = new FamiliesService(prisma);
+    const albums = new AlbumsService(prisma, families);
+    const mediaService = new MediaService(prisma, albums, storage);
+
+    const failure = await mediaService.startUpload("user-1", "album-1", {
+      date: "2026-08-03",
+      originalName: "baby.mp4",
+      contentType: "image/jpeg",
+      fileSize: 1024,
+      clientUploadId: "1d3df46c-72dc-4d7b-9d51-3da82a4c61ce"
+    }).then(
+      () => null,
+      (error: unknown) => error
+    );
+
+    expect((failure as ConflictException).getResponse()).toMatchObject({
+      code: "UPLOAD_ID_CONFLICT"
+    });
+  });
+
   it("does not let a failed upload retry exceed the daily media limit", async () => {
     const existing = {
       id: "media-failed",
@@ -1102,6 +1166,8 @@ describe("media upload idempotency", () => {
       albumDate: new Date("2026-08-03T00:00:00.000Z"),
       uploadedById: "user-1",
       originalName: "baby.jpg",
+      uploadContentType: "image/jpeg",
+      uploadSize: 1024,
       status: "FAILED",
       tempObjectKey: "temp/family-1/media-failed",
       capturedAt: null,
@@ -1151,6 +1217,8 @@ describe("media upload idempotency", () => {
       albumDate: new Date("2026-08-03T00:00:00.000Z"),
       uploadedById: "user-1",
       originalName: "baby.jpg",
+      uploadContentType: "image/jpeg",
+      uploadSize: 1024,
       status: "PROCESSING",
       tempObjectKey: "temp/family-1/media-1",
       capturedAt: null,
@@ -1192,6 +1260,8 @@ describe("media upload idempotency", () => {
       albumDate: new Date("2026-08-03T00:00:00.000Z"),
       uploadedById: "user-1",
       originalName: "baby.jpg",
+      uploadContentType: "image/jpeg",
+      uploadSize: 1024,
       status: "DELETED",
       tempObjectKey: null,
       mediaAssetId: null,

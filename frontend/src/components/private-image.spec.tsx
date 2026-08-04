@@ -6,16 +6,18 @@ const { clientApiMock } = vi.hoisted(() => ({ clientApiMock: vi.fn() }));
 vi.mock("@/lib/api", () => ({ clientApi: clientApiMock }));
 
 import {
-  clearPrivateImageUrlCache,
-  getPrivateImageUrl,
-  MAX_SIGNED_URL_CACHE_ENTRIES,
   PrivateImage,
   shouldRequestPrivateImage
 } from "./private-image";
+import {
+  clearPrivateMediaUrlCache,
+  getPrivateMediaUrl,
+  MAX_SIGNED_URL_CACHE_ENTRIES
+} from "./private-media-url";
 
 describe("private image requests", () => {
   beforeEach(() => {
-    clearPrivateImageUrlCache();
+    clearPrivateMediaUrlCache();
     clientApiMock.mockReset();
   });
 
@@ -27,8 +29,8 @@ describe("private image requests", () => {
   it("reuses a fresh signed URL instead of requesting it on every render", async () => {
     clientApiMock.mockResolvedValue({ url: "https://storage.test/media-1" });
 
-    await getPrivateImageUrl("media-1", "thumbnail");
-    await getPrivateImageUrl("media-1", "thumbnail");
+    await getPrivateMediaUrl("media-1", "thumbnail");
+    await getPrivateMediaUrl("media-1", "thumbnail");
 
     expect(clientApiMock).toHaveBeenCalledOnce();
   });
@@ -39,9 +41,9 @@ describe("private image requests", () => {
       .mockResolvedValueOnce({ url: "https://storage.test/expired" })
       .mockResolvedValueOnce({ url: "https://storage.test/fresh" });
 
-    await getPrivateImageUrl("media-1", "thumbnail", controller.signal);
-    clearPrivateImageUrlCache("media-1", "thumbnail");
-    await expect(getPrivateImageUrl("media-1", "thumbnail", controller.signal))
+    await getPrivateMediaUrl("media-1", "thumbnail", controller.signal);
+    clearPrivateMediaUrlCache("media-1", "thumbnail");
+    await expect(getPrivateMediaUrl("media-1", "thumbnail", controller.signal))
       .resolves.toBe("https://storage.test/fresh");
 
     expect(clientApiMock.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
@@ -52,9 +54,9 @@ describe("private image requests", () => {
     clientApiMock.mockImplementation(async (path: string) => ({ url: `https://storage.test${path}` }));
 
     for (let index = 0; index <= MAX_SIGNED_URL_CACHE_ENTRIES; index += 1) {
-      await getPrivateImageUrl(`media-${index}`, "thumbnail");
+      await getPrivateMediaUrl(`media-${index}`, "thumbnail");
     }
-    await getPrivateImageUrl("media-0", "thumbnail");
+    await getPrivateMediaUrl("media-0", "thumbnail");
 
     expect(clientApiMock).toHaveBeenCalledTimes(MAX_SIGNED_URL_CACHE_ENTRIES + 2);
   });

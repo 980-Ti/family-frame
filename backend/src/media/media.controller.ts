@@ -10,18 +10,23 @@ import { RepresentativeDto, StartUploadDto } from "./media.dto.js";
 @Controller()
 @UseGuards(SessionGuard)
 export class MediaController {
-  constructor(private readonly mediaItems: MediaService) {}
+  constructor(private readonly mediaService: MediaService) {}
 
   @Post("albums/:albumId/uploads")
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   start(@CurrentUser() user: AuthUser, @Param("albumId") albumId: string, @Body() dto: StartUploadDto) {
-    return this.mediaItems.startUpload(user.id, albumId, dto);
+    return this.mediaService.startUpload(user.id, albumId, dto);
   }
 
-  @Post("mediaItems/:mediaId/complete")
+  @Post("media/:mediaId/complete")
   @Throttle({ default: { limit: 30, ttl: 60_000 } })
   complete(@CurrentUser() user: AuthUser, @Param("mediaId") mediaId: string) {
-    return this.mediaItems.complete(user.id, mediaId);
+    return this.mediaService.queueCompletion(user.id, mediaId);
+  }
+
+  @Get("media/:mediaId/status")
+  status(@CurrentUser() user: AuthUser, @Param("mediaId") mediaId: string) {
+    return this.mediaService.status(user.id, mediaId);
   }
 
   @Get("albums/:albumId/media")
@@ -34,7 +39,7 @@ export class MediaController {
     @Query("match") match?: string,
     @Query("untagged") untagged?: string
   ) {
-    return this.mediaItems.list(
+    return this.mediaService.list(
       user.id,
       albumId,
       date,
@@ -53,7 +58,7 @@ export class MediaController {
     @Query("cursor") cursor?: string,
     @Query("take") take?: string
   ) {
-    return this.mediaItems.feed(
+    return this.mediaService.feed(
       user.id,
       albumId,
       parseMediaFilter({ childTagId, childTagIds, match, untagged }),
@@ -62,13 +67,13 @@ export class MediaController {
     );
   }
 
-  @Get("mediaItems/:mediaId/url")
+  @Get("media/:mediaId/url")
   url(
     @CurrentUser() user: AuthUser,
     @Param("mediaId") mediaId: string,
     @Query("variant") variant: "thumbnail" | "display" | "original" = "display"
   ) {
-    return this.mediaItems.url(user.id, mediaId, variant);
+    return this.mediaService.url(user.id, mediaId, variant);
   }
 
   @Put("albums/:albumId/dates/:date/representative")
@@ -78,11 +83,11 @@ export class MediaController {
     @Param("date") date: string,
     @Body() dto: RepresentativeDto
   ) {
-    return this.mediaItems.setRepresentative(user.id, albumId, date, dto.mediaId);
+    return this.mediaService.setRepresentative(user.id, albumId, date, dto.mediaId);
   }
 
-  @Delete("mediaItems/:mediaId")
+  @Delete("media/:mediaId")
   remove(@CurrentUser() user: AuthUser, @Param("mediaId") mediaId: string) {
-    return this.mediaItems.remove(user.id, mediaId);
+    return this.mediaService.remove(user.id, mediaId);
   }
 }

@@ -1,9 +1,12 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 export type VideoCommandRunner = (command: string, args: string[]) => Promise<string>;
+
+const MAX_VIDEO_PIXELS = 3840 * 2160;
+const BROWSER_PIXEL_FORMATS = new Set(["yuv420p", "yuvj420p"]);
 
 export class InvalidVideoError extends Error {
   constructor() {
@@ -34,26 +37,25 @@ type ProbeResult = {
   streams?: Array<{
     codec_type?: string;
     codec_name?: string;
+    pix_fmt?: string;
     width?: number;
     height?: number;
   }>;
 };
 
 export async function processMp4(
-  source: Buffer,
+  input: string,
   runner: VideoCommandRunner = runVideoCommand
 ): Promise<{ mimeType: "video/mp4"; width: number; height: number; thumbnail: Buffer }> {
   const directory = await mkdtemp(join(tmpdir(), "family-frame-video-"));
-  const input = join(directory, "input.mp4");
   const thumbnail = join(directory, "thumbnail.webp");
 
   try {
-    await writeFile(input, source);
     let probe: ProbeResult;
     try {
       probe = JSON.parse(await runner("ffprobe", [
         "-v", "error",
-        "-show_entries", "format=format_name:stream=codec_type,codec_name,width,height",
+        "-show_entries", "format=format_name:stream=codec_type,codec_name,pix_fmt,width,height",
         "-of", "json",
         input
       ])) as ProbeResult;
@@ -71,6 +73,9 @@ export async function processMp4(
       || video?.codec_name !== "h264"
       || !video.width
       || !video.height
+      || video.width * video.height > MAX_VIDEO_PIXELS
+      || !video.pix_fmt
+      || !BROWSER_PIXEL_FORMATS.has(video.pix_fmt)
       || audio.some((stream) => stream.codec_name !== "aac")
     ) {
       throw new InvalidVideoError();
@@ -78,8 +83,9 @@ export async function processMp4(
 
     try {
       await runner("ffmpeg", [
-        "-hide_banner", "-loglevel", "error", "-y",
+        "-hide_banner", "-loglevel", "error", "-nostdin", "-y",
         "-i", input,
+        "-map", "0:v:0", "-an",
         "-frames:v", "1",
         "-vf", "scale=320:320:force_original_aspect_ratio=increase,crop=320:320",
         thumbnail

@@ -80,6 +80,32 @@ export async function uploadMediaObject(url: string, file: File): Promise<void> 
   if (!response.ok) throw new Error("파일 전송에 실패했습니다.");
 }
 
+type MediaProcessingStatus = {
+  status: "PENDING_UPLOAD" | "PROCESSING" | "READY" | "FAILED";
+  failureReason: string | null;
+};
+
+export async function waitForMediaReady(
+  mediaId: string,
+  getStatus: (mediaId: string) => Promise<MediaProcessingStatus> = (id) =>
+    clientApi<MediaProcessingStatus>(`/media/${id}/status`),
+  wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
+    new Promise((resolve) => setTimeout(resolve, milliseconds))
+): Promise<void> {
+  const deadline = Date.now() + 15 * 60_000;
+  while (Date.now() < deadline) {
+    const result = await getStatus(mediaId);
+    if (result.status === "READY") return;
+    if (result.status === "FAILED") {
+      throw new Error(result.failureReason === "INVALID_VIDEO"
+        ? "H.264 영상과 AAC 음성을 사용하는 MP4 파일만 올릴 수 있습니다."
+        : "파일 처리에 실패했습니다. 잠시 후 다시 시도해주세요.");
+    }
+    await wait(1_000);
+  }
+  throw new Error("파일 처리 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.");
+}
+
 export function uploadStartPayload(media: PendingMedia) {
   return {
     date: media.albumDate,
@@ -106,7 +132,7 @@ export function UploadForm({
 }) {
   const router = useRouter();
   const previewUrls = useRef(new Set<string>());
-  const [mediaItems, setMedia] = useState<PendingMedia[]>([]);
+  const [mediaItems, setMediaItems] = useState<PendingMedia[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<string[]>([]);
   const [reading, setReading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -142,7 +168,7 @@ export function UploadForm({
 
     previewUrls.current.forEach((url) => URL.revokeObjectURL(url));
     previewUrls.current.clear();
-    setMedia([]);
+    setMediaItems([]);
     setReading(true);
     try {
       const nextMedia: PendingMedia[] = [];
@@ -174,14 +200,14 @@ export function UploadForm({
         });
       }
       nextMedia.forEach((media) => previewUrls.current.add(media.previewUrl));
-      setMedia(nextMedia);
+      setMediaItems(nextMedia);
     } finally {
       setReading(false);
     }
   }
 
   function changeDate(id: string, albumDate: string) {
-    setMedia((current) =>
+    setMediaItems((current) =>
       current.map((media) =>
         media.id === id
           ? { ...media, albumDate, dateSource: "USER" }
@@ -195,7 +221,7 @@ export function UploadForm({
       ? selectedTagIds.filter((tagId) => tagId !== id)
       : [...selectedTagIds, id];
     setSelectedTagIds(next);
-    setMedia((mediaItems) =>
+    setMediaItems((mediaItems) =>
       mediaItems.map((media) =>
         media.status === "done" ? media : { ...media, childTagIds: next }
       )
@@ -203,7 +229,7 @@ export function UploadForm({
   }
 
   function toggleMediaTag(mediaId: string, tagId: string) {
-    setMedia((current) =>
+    setMediaItems((current) =>
       current.map((media) =>
         media.id !== mediaId
           ? media
@@ -220,7 +246,7 @@ export function UploadForm({
   function removeMedia(media: PendingMedia) {
     URL.revokeObjectURL(media.previewUrl);
     previewUrls.current.delete(media.previewUrl);
-    setMedia((current) => current.filter((item) => item.id !== media.id));
+    setMediaItems((current) => current.filter((item) => item.id !== media.id));
   }
 
   async function upload() {
@@ -232,7 +258,7 @@ export function UploadForm({
     let failed = 0;
     try {
       for (const media of pendingMedia) {
-        setMedia((current) =>
+        setMediaItems((current) =>
           current.map((item) =>
             item.id === media.id
               ? { ...item, status: "uploading", error: undefined }
@@ -252,9 +278,10 @@ export function UploadForm({
           }
           await clientApi(`/media/${start.mediaId}/complete`, {
             method: "POST"
-          }, 300_000);
+          });
+          await waitForMediaReady(start.mediaId);
           completed += 1;
-          setMedia((current) =>
+          setMediaItems((current) =>
             current.map((item) =>
               item.id === media.id ? { ...item, status: "done" } : item
             )
@@ -264,7 +291,7 @@ export function UploadForm({
           const detail = error instanceof Error
             ? error.message
             : "파일을 올리지 못했습니다.";
-          setMedia((current) =>
+          setMediaItems((current) =>
             current.map((item) =>
               item.id === media.id
                 ? { ...item, status: "error", error: detail }

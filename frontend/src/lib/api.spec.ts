@@ -60,4 +60,20 @@ describe("client API requests", () => {
       method: "DELETE"
     })).resolves.toBeUndefined();
   });
+
+  it("preserves backend error codes for UI handling", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      code: "INVALID_VIDEO",
+      message: "영상 파일이 올바르지 않습니다."
+    }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" }
+    }));
+
+    const error = await clientApi("/media/media-1/complete").catch((error: unknown) => error as Error & { code?: string });
+
+    expect(error).toBeInstanceOf(Error);
+    expect(error.message).toBe("영상 파일이 올바르지 않습니다.");
+    expect(error.code).toBe("INVALID_VIDEO");
+  });
 });

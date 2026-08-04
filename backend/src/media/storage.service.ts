@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadBucketCommand,
@@ -8,6 +9,13 @@ import {
   S3Client
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { env } from "../common/env.js";
 
 const MAX_IMAGE_UPLOAD_BYTES = 20 * 1024 * 1024;
@@ -16,7 +24,7 @@ const STORAGE_REQUEST_TIMEOUT_MS = 30_000;
 const VIDEO_TRANSFER_TIMEOUT_MS = 5 * 60_000;
 
 export class StorageObjectError extends Error {
-  constructor(readonly code: "FILE_TOO_LARGE" | "EMPTY_OBJECT") {
+  constructor(readonly code: "FILE_TOO_LARGE" | "EMPTY_OBJECT" | "INVALID_CONTENT_TYPE") {
     super(code);
     this.name = "StorageObjectError";
   }
@@ -109,6 +117,69 @@ export class StorageService {
     return this.client.send(
       new DeleteObjectCommand({ Bucket: this.config.bucket, Key: key }),
       { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
+    );
+  }
+
+  async readVideo(key: string): Promise<{
+    path: string;
+    sha256: string;
+    contentType: "video/mp4";
+    cleanup: () => Promise<void>;
+  }> {
+    const head = await this.client.send(
+      new HeadObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      { abortSignal: AbortSignal.timeout(STORAGE_REQUEST_TIMEOUT_MS) }
+    );
+    if (head.ContentType !== "video/mp4") throw new StorageObjectError("INVALID_CONTENT_TYPE");
+    if ((head.ContentLength ?? 0) > MAX_VIDEO_UPLOAD_BYTES) throw new StorageObjectError("FILE_TOO_LARGE");
+    if (head.ContentLength === 0) throw new StorageObjectError("EMPTY_OBJECT");
+
+    const response = await this.client.send(
+      new GetObjectCommand({ Bucket: this.config.bucket, Key: key }),
+      { abortSignal: AbortSignal.timeout(VIDEO_TRANSFER_TIMEOUT_MS) }
+    );
+    if (!response.Body) throw new StorageObjectError("EMPTY_OBJECT");
+
+    const directory = await mkdtemp(join(tmpdir(), "family-frame-video-"));
+    const path = join(directory, "input.mp4");
+    const hash = createHash("sha256");
+    let size = 0;
+    const limit = new Transform({
+      transform(chunk: Buffer, _encoding, callback) {
+        size += chunk.byteLength;
+        if (size > MAX_VIDEO_UPLOAD_BYTES) callback(new StorageObjectError("FILE_TOO_LARGE"));
+        else {
+          hash.update(chunk);
+          callback(null, chunk);
+        }
+      }
+    });
+
+    try {
+      await pipeline(Readable.from(response.Body as AsyncIterable<Uint8Array>), limit, createWriteStream(path));
+      if (size === 0) throw new StorageObjectError("EMPTY_OBJECT");
+      return {
+        path,
+        sha256: hash.digest("hex"),
+        contentType: "video/mp4",
+        cleanup: () => rm(directory, { recursive: true, force: true })
+      };
+    } catch (error) {
+      await rm(directory, { recursive: true, force: true });
+      throw error;
+    }
+  }
+
+  copy(sourceKey: string, destinationKey: string, contentType: string) {
+    return this.client.send(
+      new CopyObjectCommand({
+        Bucket: this.config.bucket,
+        Key: destinationKey,
+        CopySource: encodeURIComponent(`${this.config.bucket}/${sourceKey}`),
+        ContentType: contentType,
+        MetadataDirective: "REPLACE"
+      }),
+      { abortSignal: AbortSignal.timeout(VIDEO_TRANSFER_TIMEOUT_MS) }
     );
   }
 

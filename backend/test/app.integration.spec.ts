@@ -109,14 +109,25 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
       .post(`/api/media/${start.body.mediaId}/complete`)
       .set("Cookie", sessionCookie);
     expect(completed.status, JSON.stringify(completed.body)).toBe(201);
-    expect(completed.body.status).toBe("READY");
+    expect(completed.body.status).toBe("PROCESSING");
 
-    const mediaItems = await request(app.getHttpServer())
+    let processingStatus = "PROCESSING";
+    for (let attempt = 0; attempt < 50 && !["READY", "FAILED"].includes(processingStatus); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const status = await request(app.getHttpServer())
+        .get(`/api/media/${start.body.mediaId}/status`)
+        .set("Cookie", sessionCookie)
+        .expect(200);
+      processingStatus = status.body.status as string;
+    }
+    expect(processingStatus).toBe("READY");
+
+    const items = await request(app.getHttpServer())
       .get(`/api/albums/${albumId}/media?date=2026-08-02`)
       .set("Cookie", sessionCookie)
       .expect(200);
-    expect(mediaItems.body).toHaveLength(1);
-    expect(mediaItems.body[0].id).toBe(start.body.mediaId);
+    expect(items.body).toHaveLength(1);
+    expect(items.body[0].id).toBe(start.body.mediaId);
 
     const signed = await request(app.getHttpServer())
       .get(`/api/media/${start.body.mediaId}/url?variant=thumbnail`)

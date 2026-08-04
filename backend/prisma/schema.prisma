@@ -152,6 +152,8 @@ model Media {
   clientUploadId String
   tempObjectKey  String?
   originalName   String
+  uploadContentType String
+  uploadSize     Int
   status         MediaStatus @default(PENDING_UPLOAD)
   failureReason  String?
   createdAt      DateTime    @default(now())

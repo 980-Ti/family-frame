@@ -2,65 +2,22 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { clientApi } from "@/lib/api";
+import {
+  clearPrivateMediaUrlCache,
+  getPrivateMediaUrl,
+  privateMediaKey,
+  type PrivateMediaVariant
+} from "./private-media-url";
 
-export type PrivateImageVariant = "thumbnail" | "display";
-
-type CachedUrl = { url: string; expiresAt: number };
 type ImageSource = {
   mediaId: string;
-  variant: PrivateImageVariant;
+  variant: PrivateMediaVariant;
   url: string;
   alt: string;
 };
 
-const signedUrlCache = new Map<string, CachedUrl>();
-const SIGNED_URL_CACHE_MS = 60_000;
-export const MAX_SIGNED_URL_CACHE_ENTRIES = 160;
-
-function imageKey(mediaId: string, variant: PrivateImageVariant) {
-  return `${mediaId}:${variant}`;
-}
-
-export function clearPrivateImageUrlCache(mediaId?: string, variant?: PrivateImageVariant) {
-  if (!mediaId) {
-    signedUrlCache.clear();
-    return;
-  }
-  if (variant) {
-    signedUrlCache.delete(imageKey(mediaId, variant));
-    return;
-  }
-  signedUrlCache.delete(imageKey(mediaId, "thumbnail"));
-  signedUrlCache.delete(imageKey(mediaId, "display"));
-}
-
-export async function getPrivateImageUrl(
-  mediaId: string,
-  variant: PrivateImageVariant,
-  signal?: AbortSignal
-) {
-  const key = imageKey(mediaId, variant);
-  const cached = signedUrlCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) {
-    return cached.url;
-  }
-  if (cached) signedUrlCache.delete(key);
-
-  const result = await clientApi<{ url: string }>(
-    `/media/${mediaId}/url?variant=${variant}`,
-    { signal }
-  );
-  signedUrlCache.set(key, {
-    url: result.url,
-    expiresAt: Date.now() + SIGNED_URL_CACHE_MS
-  });
-  if (signedUrlCache.size > MAX_SIGNED_URL_CACHE_ENTRIES) signedUrlCache.delete(signedUrlCache.keys().next().value!);
-  return result.url;
-}
-
 export function shouldRequestPrivateImage(
-  variant: PrivateImageVariant,
+  variant: PrivateMediaVariant,
   visibleKey: string | null,
   key: string
 ) {
@@ -76,13 +33,13 @@ export function PrivateImage({
   onStatusChange
 }: {
   mediaId: string;
-  variant?: PrivateImageVariant;
+  variant?: PrivateMediaVariant;
   alt: string;
   className?: string;
   requestKey?: number;
   onStatusChange?: (mediaId: string, status: "loading" | "ready" | "error") => void;
 }) {
-  const key = imageKey(mediaId, variant);
+  const key = privateMediaKey(mediaId, variant);
   const [visibleKey, setVisibleKey] = useState<string | null>(null);
   const [source, setSource] = useState<ImageSource>();
   const [reloadKey, setReloadKey] = useState(0);
@@ -117,7 +74,7 @@ export function PrivateImage({
     const controller = new AbortController();
     onStatusRef.current?.(mediaId, "loading");
 
-    void getPrivateImageUrl(mediaId, variant, controller.signal)
+    void getPrivateMediaUrl(mediaId, variant, controller.signal)
       .then(async (url) => {
         if (variant === "display") {
           const image = new window.Image();
@@ -130,7 +87,7 @@ export function PrivateImage({
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        clearPrivateImageUrlCache(mediaId, variant);
+        clearPrivateMediaUrlCache(mediaId, variant);
         onStatusRef.current?.(mediaId, "error");
       });
 
@@ -145,7 +102,7 @@ export function PrivateImage({
 
   function handleImageError() {
     if (!displayedSource || displayedSource.mediaId !== mediaId) return;
-    clearPrivateImageUrlCache(mediaId, variant);
+    clearPrivateMediaUrlCache(mediaId, variant);
     const retryScope = `${key}:${requestKey}`;
     if (retryRef.current.scope !== retryScope) {
       retryRef.current = { scope: retryScope, attempted: false };

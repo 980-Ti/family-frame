@@ -115,6 +115,8 @@ CREATE TABLE "Media" (
     "clientUploadId" TEXT NOT NULL,
     "tempObjectKey" TEXT,
     "originalName" TEXT NOT NULL,
+    "uploadContentType" TEXT NOT NULL,
+    "uploadSize" INTEGER NOT NULL,
     "status" "MediaStatus" NOT NULL DEFAULT 'PENDING_UPLOAD',
     "failureReason" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,

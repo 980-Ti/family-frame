@@ -33,16 +33,16 @@ import { PrivateVideo } from "./private-video";
 type ZoomTransform = { scale: number; x: number; y: number };
 
 const INITIAL_ZOOM: ZoomTransform = { scale: 1, x: 0, y: 0 };
-type ImageLoadState = { mediaId: string; status: "loading" | "ready" | "error" };
+type MediaLoadState = { mediaId: string; status: "loading" | "ready" | "error" };
 
-export function canInteractWithMedia(selectedId: string, image: ImageLoadState): boolean {
-  return image.mediaId === selectedId && image.status === "ready";
+export function canInteractWithMedia(selectedId: string, media: MediaLoadState): boolean {
+  return media.mediaId === selectedId && media.status === "ready";
 }
 
 export function nextPresentedMediaId(
   currentId: string | null,
   requestedId: string,
-  status: ImageLoadState["status"]
+  status: MediaLoadState["status"]
 ) {
   return status === "ready" ? requestedId : currentId;
 }
@@ -112,10 +112,10 @@ export function MediaGallery({
   const [presentedId, setPresentedId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState("");
-  const [imageState, setImageState] = useState<ImageLoadState>({ mediaId: "", status: "loading" });
-  const [imageRequestKey, setImageRequestKey] = useState(0);
-  const handleImageStatus = useCallback((mediaId: string, status: ImageLoadState["status"]) => {
-    setImageState({ mediaId, status });
+  const [mediaState, setMediaState] = useState<MediaLoadState>({ mediaId: "", status: "loading" });
+  const [mediaRequestKey, setMediaRequestKey] = useState(0);
+  const handleMediaStatus = useCallback((mediaId: string, status: MediaLoadState["status"]) => {
+    setMediaState({ mediaId, status });
     setPresentedId((current) => nextPresentedMediaId(current, mediaId, status));
   }, []);
   const [zoom, setZoom] = useState<ZoomTransform>(INITIAL_ZOOM);
@@ -149,7 +149,7 @@ export function MediaGallery({
   const selectedIsVideo = selected?.mediaAsset.mimeType === "video/mp4";
   const presentedIndex = items.findIndex((media) => media.id === presentedId);
   const presented = presentedIndex >= 0 ? items[presentedIndex] : selected;
-  const imageReady = selected ? canInteractWithMedia(selected.id, imageState) : false;
+  const mediaReady = selected ? canInteractWithMedia(selected.id, mediaState) : false;
 
   function resetZoom() {
     const initial = { ...INITIAL_ZOOM };
@@ -217,12 +217,13 @@ export function MediaGallery({
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.target instanceof HTMLVideoElement) return;
     if (event.key === "ArrowLeft") move(-1);
     if (event.key === "ArrowRight") move(1);
   }
 
   async function remove() {
-    if (!selected || !imageReady) return;
+    if (!selected || !mediaReady) return;
     setDeleting(true);
     setError("");
     try {
@@ -340,10 +341,10 @@ export function MediaGallery({
                 className="media-dialog-viewport"
                 ref={selectedIsVideo ? undefined : setViewportRef}
                 style={{ touchAction: !selectedIsVideo && zoom.scale > 1 ? "none" : "pan-y" }}
-                onTouchStart={startSwipe}
-                onTouchMove={moveTouch}
-                onTouchEnd={endSwipe}
-                onTouchCancel={() => { touchStartRef.current = null; }}
+                onTouchStart={selectedIsVideo ? undefined : startSwipe}
+                onTouchMove={selectedIsVideo ? undefined : moveTouch}
+                onTouchEnd={selectedIsVideo ? undefined : endSwipe}
+                onTouchCancel={selectedIsVideo ? undefined : () => { touchStartRef.current = null; }}
               >
                 <div
                   className="media-dialog-canvas"
@@ -353,8 +354,8 @@ export function MediaGallery({
                     <PrivateVideo
                       mediaId={selected.id}
                       className="h-full w-full object-contain"
-                      requestKey={imageRequestKey}
-                      onStatusChange={handleImageStatus}
+                      requestKey={mediaRequestKey}
+                      onStatusChange={handleMediaStatus}
                     />
                   ) : (
                     <PrivateImage
@@ -362,24 +363,24 @@ export function MediaGallery({
                       variant="display"
                       alt={selected.originalName}
                       className="h-full w-full object-contain"
-                      requestKey={imageRequestKey}
-                      onStatusChange={handleImageStatus}
+                      requestKey={mediaRequestKey}
+                      onStatusChange={handleMediaStatus}
                     />
                   )}
                 </div>
-                {!imageReady && (
+                {!mediaReady && (
                   <div
                     className="media-dialog-status"
-                    data-error={imageState.mediaId === selected.id && imageState.status === "error"}
+                    data-error={mediaState.mediaId === selected.id && mediaState.status === "error"}
                   >
-                    {imageState.mediaId === selected.id && imageState.status === "error" ? (
+                    {mediaState.mediaId === selected.id && mediaState.status === "error" ? (
                       <div className="flex flex-col items-center gap-3 text-center">
                         <p className="text-sm font-medium text-white" role="alert">파일을 불러오지 못했습니다.</p>
                         <Button
                           type="button"
                           variant="secondary"
                           size="sm"
-                          onClick={() => setImageRequestKey((key) => key + 1)}
+                          onClick={() => setMediaRequestKey((key) => key + 1)}
                         >
                           다시 시도
                         </Button>
@@ -421,16 +422,16 @@ export function MediaGallery({
                 ← → 키로 항목을 이동할 수 있어요
               </p>
               <div className={`items-center gap-1 text-white ${selectedIsVideo ? "hidden" : "flex"}`}>
-                <Button variant="ghost" size="icon" type="button" disabled={!imageReady || zoom.scale <= 1} aria-label="축소" onClick={() => changeZoom(1)}>
+                <Button variant="ghost" size="icon" type="button" disabled={!mediaReady || zoom.scale <= 1} aria-label="축소" onClick={() => changeZoom(1)}>
                   <Minus aria-hidden="true" />
                 </Button>
                 <p className="min-w-10 text-center text-xs font-semibold tabular-nums text-white/70" aria-live="polite">
                   {Math.round(zoom.scale * 100)}%
                 </p>
-                <Button variant="ghost" size="icon" type="button" disabled={!imageReady || zoom.scale >= 4} aria-label="확대" onClick={() => changeZoom(-1)}>
+                <Button variant="ghost" size="icon" type="button" disabled={!mediaReady || zoom.scale >= 4} aria-label="확대" onClick={() => changeZoom(-1)}>
                   <Plus aria-hidden="true" />
                 </Button>
-                <Button variant="ghost" size="icon" type="button" disabled={!imageReady || zoom.scale === 1} aria-label="확대 초기화" onClick={resetZoom}>
+                <Button variant="ghost" size="icon" type="button" disabled={!mediaReady || zoom.scale === 1} aria-label="확대 초기화" onClick={resetZoom}>
                   <RotateCcw aria-hidden="true" />
                 </Button>
               </div>
@@ -443,7 +444,7 @@ export function MediaGallery({
                 {(canDeleteAll || selected.uploadedById === currentUserId) && (
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
-                      <Button aria-label={deleting ? "삭제 중" : "삭제"} variant="ghost" className="shrink-0 text-[#ff8b82] hover:bg-white/10 hover:text-[#ffaaa3]" disabled={deleting || !imageReady}>
+                      <Button aria-label={deleting ? "삭제 중" : "삭제"} variant="ghost" className="shrink-0 text-[#ff8b82] hover:bg-white/10 hover:text-[#ffaaa3]" disabled={deleting || !mediaReady}>
                         <Trash2 aria-hidden="true" />
                         <span className="hidden sm:inline">{deleting ? "삭제 중…" : selectedIsVideo ? "영상 삭제" : "사진 삭제"}</span>
                       </Button>

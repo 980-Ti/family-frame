@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { clearPrivateImageUrlCache, getPrivateImageUrl } from "./private-image";
+import { clearPrivateMediaUrlCache, getPrivateMediaUrl } from "./private-media-url";
 
 export function PrivateVideo({
   mediaId,
@@ -25,13 +25,13 @@ export function PrivateVideo({
   useEffect(() => {
     const controller = new AbortController();
     onStatusRef.current?.(mediaId, "loading");
-    void getPrivateImageUrl(mediaId, "display", controller.signal)
+    void getPrivateMediaUrl(mediaId, "display", controller.signal)
       .then((url) => {
         if (!controller.signal.aborted) setSource({ mediaId, url });
       })
       .catch(() => {
         if (controller.signal.aborted) return;
-        clearPrivateImageUrlCache(mediaId, "display");
+        clearPrivateMediaUrlCache(mediaId, "display");
         onStatusRef.current?.(mediaId, "error");
       });
     return () => controller.abort();
@@ -48,7 +48,7 @@ export function PrivateVideo({
       preload="metadata"
       onLoadedMetadata={() => onStatusRef.current?.(mediaId, "ready")}
       onError={() => {
-        clearPrivateImageUrlCache(mediaId, "display");
+        clearPrivateMediaUrlCache(mediaId, "display");
         onStatusRef.current?.(mediaId, "error");
       }}
     >

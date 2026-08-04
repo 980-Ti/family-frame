@@ -34,23 +34,23 @@ const ASSET_DELETION_EXPIRY_MS = 2 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60_000;
 const CLEANUP_BATCH_SIZE = 25;
 const MAX_IMAGE_PIXELS = 60_000_000;
-const MAX_CONCURRENT_IMAGE_PROCESSING = 2;
-let activeImageProcessing = 0;
-const imageProcessingWaiters: Array<() => void> = [];
+const MAX_CONCURRENT_MEDIA_PROCESSING = 2;
+let activeMediaProcessing = 0;
+const mediaProcessingWaiters: Array<() => void> = [];
 
-async function acquireImageProcessingSlot(): Promise<() => void> {
-  if (activeImageProcessing >= MAX_CONCURRENT_IMAGE_PROCESSING) {
-    await new Promise<void>((resolve) => imageProcessingWaiters.push(resolve));
+async function acquireMediaProcessingSlot(): Promise<() => void> {
+  if (activeMediaProcessing >= MAX_CONCURRENT_MEDIA_PROCESSING) {
+    await new Promise<void>((resolve) => mediaProcessingWaiters.push(resolve));
   } else {
-    activeImageProcessing += 1;
+    activeMediaProcessing += 1;
   }
   let released = false;
   return () => {
     if (released) return;
     released = true;
-    const next = imageProcessingWaiters.shift();
+    const next = mediaProcessingWaiters.shift();
     if (next) next();
-    else activeImageProcessing -= 1;
+    else activeMediaProcessing -= 1;
   };
 }
 
@@ -105,6 +105,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           status: true,
           tempObjectKey: true,
           mediaAssetId: true,
+          uploadedById: true,
           failureReason: true,
           updatedAt: true
         },
@@ -112,6 +113,12 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         take: CLEANUP_BATCH_SIZE
       });
       for (const media of mediaItems) {
+        if (media.status === "PROCESSING") {
+          void this.complete(media.uploadedById, media.id).catch(() => {
+            this.logger.warn("중단된 미디어 처리를 재개하지 못했습니다. 다음 주기에 다시 시도합니다.");
+          });
+          continue;
+        }
         if (media.status === "READY") {
           try {
             await this.cleanupTempObject(media);
@@ -174,6 +181,8 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           existing.uploadedById === userId &&
           existing.albumDate.getTime() === albumDate.getTime() &&
           existing.originalName === dto.originalName &&
+          existing.uploadContentType === dto.contentType &&
+          existing.uploadSize === dto.fileSize &&
           (existing.capturedAt?.getTime() ?? null) ===
             (dto.capturedAt ? new Date(dto.capturedAt).getTime() : null) &&
           existing.dateSource === (dto.dateSource ?? "USER") &&
@@ -258,6 +267,8 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           dateSource: dto.dateSource ?? "USER",
           clientUploadId: dto.clientUploadId,
           originalName: dto.originalName,
+          uploadContentType: dto.contentType,
+          uploadSize: dto.fileSize,
           tempObjectKey: `temp/${album.familyId}/${randomUUID()}`,
           status: "PENDING_UPLOAD",
           childTags: childTagIds.length
@@ -293,6 +304,44 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  async status(userId: string, mediaId: string) {
+    const media = await this.prisma.media.findUnique({
+      where: { id: mediaId },
+      select: { id: true, albumId: true, status: true, failureReason: true }
+    });
+    if (!media) throw new NotFoundException({ code: "MEDIA_NOT_FOUND", message: "미디어를 찾을 수 없습니다." });
+    await this.albums.requireAlbum(userId, media.albumId);
+    return { mediaId: media.id, status: media.status, failureReason: media.failureReason };
+  }
+
+  async queueCompletion(userId: string, mediaId: string) {
+    const media = await this.prisma.media.findUnique({
+      where: { id: mediaId },
+      select: {
+        id: true,
+        albumId: true,
+        uploadedById: true,
+        tempObjectKey: true,
+        status: true,
+        updatedAt: true
+      }
+    });
+    if (!media) throw new NotFoundException({ code: "MEDIA_NOT_FOUND", message: "미디어를 찾을 수 없습니다." });
+    await this.albums.requireAlbum(userId, media.albumId);
+    if (media.status === "READY") return { mediaId: media.id, status: media.status };
+    if (media.uploadedById !== userId || !media.tempObjectKey) {
+      throw new ForbiddenException({ code: "UPLOAD_OWNER_REQUIRED", message: "업로드한 사용자만 완료할 수 있습니다." });
+    }
+    const processingIsFresh = media.status === "PROCESSING"
+      && media.updatedAt >= new Date(Date.now() - UPLOAD_EXPIRY_MS);
+    if (!processingIsFresh) {
+      void this.complete(userId, mediaId).catch(() => {
+        this.logger.warn("미디어 비동기 처리를 완료하지 못했습니다. 상태 조회에서 실패 사유를 반환합니다.");
+      });
+    }
+    return { mediaId: media.id, status: "PROCESSING" };
+  }
+
   async complete(userId: string, mediaId: string) {
     const media = await this.prisma.media.findUnique({
       where: { id: mediaId },
@@ -309,7 +358,8 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     }
 
     // ponytail: process-local gate; move processing to a shared queue when API instances scale horizontally.
-    const releaseImageProcessingSlot = await acquireImageProcessingSlot();
+    const releaseMediaProcessingSlot = await acquireMediaProcessingSlot();
+    let cleanupVideoSource: (() => Promise<void>) | undefined;
     try {
     const claimTime = new Date();
     const claimMedia = (tx: PrismaService, allowFailed = false) => tx.media.updateMany({
@@ -358,8 +408,18 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       });
     }
     try {
-      const source = await this.storage.read(media.tempObjectKey);
-      const sha256 = createHash("sha256").update(source.bytes).digest("hex");
+      let sourceBytes: Buffer | null = null;
+      let videoSource: Awaited<ReturnType<StorageService["readVideo"]>> | null = null;
+      let sha256: string;
+      if (media.uploadContentType === "video/mp4") {
+        videoSource = await this.storage.readVideo(media.tempObjectKey);
+        cleanupVideoSource = videoSource.cleanup;
+        sha256 = videoSource.sha256;
+      } else {
+        const source = await this.storage.read(media.tempObjectKey);
+        sourceBytes = source.bytes;
+        sha256 = createHash("sha256").update(sourceBytes).digest("hex");
+      }
       const prefix = `assets/${media.album.familyId}/${sha256}`;
       let mimeType: string;
       let width: number;
@@ -370,9 +430,9 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       let displayKey: string;
       const thumbnailKey = `${prefix}/thumbnail.webp`;
 
-      if (source.contentType === "video/mp4") {
+      if (videoSource) {
         try {
-          const video = await processMp4(source.bytes);
+          const video = await processMp4(videoSource.path);
           mimeType = video.mimeType;
           width = video.width;
           height = video.height;
@@ -396,9 +456,10 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         displayKey = originalKey;
         display = null;
       } else {
+        if (!sourceBytes) throw new StorageObjectError("EMPTY_OBJECT");
         let metadata;
         try {
-          metadata = await sharp(source.bytes, {
+          metadata = await sharp(sourceBytes, {
             failOn: "error",
             limitInputPixels: MAX_IMAGE_PIXELS
           }).metadata();
@@ -427,12 +488,12 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           sequentialRead: true
         };
         try {
-          display = await sharp(source.bytes, sharpOptions)
+          display = await sharp(sourceBytes, sharpOptions)
             .rotate()
             .resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true })
             .webp({ quality: 84 })
             .toBuffer();
-          thumbnail = await sharp(source.bytes, sharpOptions)
+          thumbnail = await sharp(sourceBytes, sharpOptions)
             .rotate()
             .resize(320, 320, { fit: "cover" })
             .webp({ quality: 78 })
@@ -488,7 +549,9 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       });
       if (reservation.needsUpload) {
         await Promise.all([
-          this.storage.put(originalKey, source.bytes, mimeType),
+          videoSource
+            ? this.storage.copy(media.tempObjectKey, originalKey, mimeType)
+            : this.storage.put(originalKey, sourceBytes!, mimeType),
           ...(display ? [this.storage.put(displayKey, display, "image/webp")] : []),
           this.storage.put(thumbnailKey, thumbnail, "image/webp")
         ]);
@@ -527,7 +590,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       const completed = await this.cleanupTempObject(ready);
       return { mediaId: completed.id, status: completed.status };
     } catch (error) {
-      if (error instanceof ServiceUnavailableException || error instanceof ConflictException) throw error;
+      if (error instanceof ConflictException) throw error;
       const inputError =
         error instanceof BadRequestException
           ? error
@@ -536,7 +599,9 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
                 code: error.code,
                 message: error.code === "FILE_TOO_LARGE"
                   ? "사진은 20MB, 영상은 200MB까지 업로드할 수 있습니다."
-                  : "업로드한 파일이 비어 있습니다."
+                  : error.code === "INVALID_CONTENT_TYPE"
+                    ? "올바른 MP4 영상 파일이 아닙니다."
+                    : "업로드한 파일이 비어 있습니다."
               })
             : null;
       const response = inputError?.getResponse() ?? null;
@@ -569,7 +634,8 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       });
     }
     } finally {
-      releaseImageProcessingSlot();
+      await cleanupVideoSource?.();
+      releaseMediaProcessingSlot();
     }
   }
 
@@ -585,7 +651,9 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         data: { tempObjectKey: null, failureReason },
         include: { album: true, mediaAsset: true }
       });
-    } catch {
+    } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
+      this.logger.warn(`임시 객체 정리 실패: ${media.id} (${cause})`);
       await this.prisma.media.update({
         where: { id: media.id },
         data: { failureReason: failureReason ?? "TEMP_OBJECT_CLEANUP_PENDING" }
@@ -726,7 +794,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     if (!["thumbnail", "display", "original"].includes(variant)) {
       throw new BadRequestException({
         code: "INVALID_MEDIA_VARIANT",
-        message: "지원하지 않는 이미지 형식입니다."
+        message: "지원하지 않는 미디어 형식입니다."
       });
     }
     const media = await this.prisma.media.findFirst({

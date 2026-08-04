@@ -27,10 +27,10 @@ export function AlbumBrowserHeader({
   album: Album;
   month: string;
   filter: MediaFilterState;
-  activeView: "calendar" | "mediaItems";
+  activeView: "calendar" | "media";
 }) {
   const calendarQuery = mediaFilterPageParams(filter, { month }).toString();
-  const mediaItemsQuery = mediaFilterPageParams(filter).toString();
+  const mediaQuery = mediaFilterPageParams(filter).toString();
   const isOwner = family.members[0]?.role === "OWNER";
 
   return (
@@ -101,10 +101,10 @@ export function AlbumBrowserHeader({
               <LinkPendingIndicator />
             </Link>
           </Button>
-          <Button asChild variant="ghost" size="sm" className="album-view-control" data-active={activeView === "mediaItems"}>
+          <Button asChild variant="ghost" size="sm" className="album-view-control" data-active={activeView === "media"}>
             <Link
-              href={`/families/${family.id}/albums/${album.id}/media${mediaItemsQuery ? `?${mediaItemsQuery}` : ""}`}
-              aria-current={activeView === "mediaItems" ? "page" : undefined}
+              href={`/families/${family.id}/albums/${album.id}/media${mediaQuery ? `?${mediaQuery}` : ""}`}
+              aria-current={activeView === "media" ? "page" : undefined}
             >
               <Images aria-hidden="true" />
               모아보기

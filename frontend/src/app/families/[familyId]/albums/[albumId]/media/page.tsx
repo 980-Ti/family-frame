@@ -62,7 +62,7 @@ export default async function MediaPage({
         album={album}
         month={month}
         filter={filter}
-        activeView="mediaItems"
+        activeView="media"
       />
       <ChildTagFilter
         baseHref={`/families/${familyId}/albums/${albumId}/media`}

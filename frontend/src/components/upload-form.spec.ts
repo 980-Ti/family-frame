@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { UploadForm, uploadMediaObject, uploadStartPayload } from "./upload-form";
+import { UploadForm, uploadMediaObject, uploadStartPayload, waitForMediaReady } from "./upload-form";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn() })
@@ -45,12 +45,23 @@ describe("media upload retry", () => {
     expect(request.mock.calls[0]?.[1]?.signal).toBe(signal);
   });
 
-  it("offers MP4 selection alongside supported mediaItems", () => {
+  it("offers MP4 selection alongside supported media files", () => {
     const markup = renderToStaticMarkup(
       createElement(UploadForm, { familyId: "family-1", albumId: "album-1", childTags: [] })
     );
 
     expect(markup).toContain("사진·영상 선택");
     expect(markup).toContain('accept="image/jpeg,image/png,image/webp,video/mp4"');
+  });
+
+  it("polls until background media processing is ready", async () => {
+    const getStatus = vi.fn()
+      .mockResolvedValueOnce({ status: "PROCESSING", failureReason: null })
+      .mockResolvedValueOnce({ status: "READY", failureReason: null });
+    const wait = vi.fn(async () => undefined);
+
+    await expect(waitForMediaReady("media-1", getStatus, wait)).resolves.toBeUndefined();
+    expect(getStatus).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(1_000);
   });
 });
