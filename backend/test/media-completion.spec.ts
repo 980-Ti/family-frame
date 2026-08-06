@@ -25,11 +25,9 @@ const png = Buffer.from(
 describe("media completion recovery", () => {
   beforeEach(() => {
     processMp4Mock.mockReset();
-    delete process.env.MEDIA_DEDUPLICATION_ENABLED;
   });
 
-  it("reuses an existing asset for duplicate images when deduplication is enabled", async () => {
-    process.env.MEDIA_DEDUPLICATION_ENABLED = "true";
+  it("creates an independent asset for each duplicate image", async () => {
 
     const mediaStates = [
       {
@@ -68,15 +66,13 @@ describe("media completion recovery", () => {
     const tx = {
       $executeRaw: async () => undefined,
       mediaAsset: {
-        upsert: async ({ where, create }: { where: { deduplicationKey: string }; create: Record<string, unknown> }) => {
-          const existing = assets.find((item) => item.deduplicationKey === where.deduplicationKey);
-          if (existing) return existing;
-          const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          const asset = { id: `asset-${assets.length + 1}`, ...data };
           assets.push(asset);
           return asset;
         },
-        findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
-          assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
+        findUnique: async ({ where }: { where: { id: string } }) =>
+          assets.find((item) => item.id === where.id) ?? null,
         updateMany: async ({ where, data }: { where: { id: string; status?: string }; data: Record<string, unknown> }) => {
           const asset = assets.find((item) => item.id === where.id);
           if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
@@ -126,17 +122,6 @@ describe("media completion recovery", () => {
           return { ...current, mediaAsset: current.mediaAssetId ? assets[0] : null };
         }
       },
-      mediaAsset: {
-        findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
-          assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
-        upsert: async ({ where, create }: { where: { deduplicationKey: string }; create: Record<string, unknown> }) => {
-          const existing = assets.find((item) => item.deduplicationKey === where.deduplicationKey);
-          if (existing) return existing;
-          const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
-          assets.push(asset);
-          return asset;
-        }
-      },
       $transaction: async (work: (tx: Record<string, unknown>) => Promise<unknown>) => work(tx as unknown as Record<string, unknown>)
     } as unknown as PrismaService;
     const albums = { requireAlbum: async () => ({ album: { familyId: "family-1" } }) } as unknown as AlbumsService;
@@ -151,12 +136,14 @@ describe("media completion recovery", () => {
     await expect(service.complete("user-1", "media-1")).resolves.toEqual({ mediaId: "media-1", status: "READY" });
     await expect(service.complete("user-1", "media-2")).resolves.toEqual({ mediaId: "media-2", status: "READY" });
 
-    expect(assets).toHaveLength(1);
-    expect(put).toHaveBeenCalledTimes(3);
+    expect(assets).toHaveLength(2);
+    expect(assets[0].originalKey).not.toBe(assets[1].originalKey);
+    expect(assets[0].displayKey).not.toBe(assets[1].displayKey);
+    expect(assets[0].thumbnailKey).not.toBe(assets[1].thumbnailKey);
+    expect(put).toHaveBeenCalledTimes(6);
   });
 
-  it("creates separate assets for duplicate images when deduplication is disabled", async () => {
-    process.env.MEDIA_DEDUPLICATION_ENABLED = "false";
+  it("does not share repeated files across families", async () => {
 
     const mediaRecords = [
       {
@@ -175,16 +162,16 @@ describe("media completion recovery", () => {
       },
       {
         id: "media-2",
-        albumId: "album-1",
+        albumId: "album-2",
         albumDate: new Date("2026-08-03T00:00:00.000Z"),
         uploadedById: "user-1",
         originalName: "baby.png",
         uploadContentType: "image/png",
         uploadSize: png.length,
-        tempObjectKey: "temp/family-1/media-2",
+        tempObjectKey: "temp/family-2/media-2",
         mediaAssetId: null as string | null,
         status: "PENDING_UPLOAD",
-        album: { id: "album-1", familyId: "family-1" },
+        album: { id: "album-2", familyId: "family-2" },
         mediaAsset: null as Record<string, unknown> | null
       }
     ];
@@ -211,37 +198,16 @@ describe("media completion recovery", () => {
           return { ...current, mediaAsset: asset ?? null };
         }
       },
-      mediaAsset: {
-        upsert: async ({ create }: { create: Record<string, unknown> }) => {
-          const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
-          assets.push(asset);
-          return asset;
-        },
-        findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
-          assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
-        updateMany: async ({ where, data }: { where: { id: string; status?: string }; data: Record<string, unknown> }) => {
-          const asset = assets.find((item) => item.id === where.id);
-          if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
-          Object.assign(asset, data);
-          return { count: 1 };
-        },
-        update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-          const asset = assets.find((item) => item.id === where.id);
-          if (!asset) throw new Error("ASSET_NOT_FOUND");
-          Object.assign(asset, data);
-          return asset;
-        }
-      },
       $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
         $executeRaw: async () => undefined,
         mediaAsset: {
-          upsert: async ({ create }: { create: Record<string, unknown> }) => {
-            const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
+          create: async ({ data }: { data: Record<string, unknown> }) => {
+            const asset = { id: `asset-${assets.length + 1}`, ...data };
             assets.push(asset);
             return asset;
           },
-          findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
-            assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
+          findUnique: async ({ where }: { where: { id: string } }) =>
+            assets.find((item) => item.id === where.id) ?? null,
           updateMany: async ({ where, data }: { where: { id: string; status?: string }; data: Record<string, unknown> }) => {
             const asset = assets.find((item) => item.id === where.id);
             if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
@@ -272,7 +238,11 @@ describe("media completion recovery", () => {
         dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
       })
     } as unknown as PrismaService;
-    const albums = { requireAlbum: async () => ({ album: { familyId: "family-1" } }) } as unknown as AlbumsService;
+    const albums = {
+      requireAlbum: async (_userId: string, albumId: string) => ({
+        album: mediaRecords.find((item) => item.albumId === albumId)!.album
+      })
+    } as unknown as AlbumsService;
     const put = vi.fn(async () => undefined);
     const storage = {
       read: async () => ({ bytes: png, contentType: "image/png" }),
@@ -285,21 +255,15 @@ describe("media completion recovery", () => {
     await expect(service.complete("user-1", "media-2")).resolves.toEqual({ mediaId: "media-2", status: "READY" });
 
     expect(assets).toHaveLength(2);
-    expect(assets.map((asset) => asset.deduplicationMode)).toEqual(["DISABLED", "DISABLED"]);
-    expect(assets[0].deduplicationKey).not.toBe(assets[1].deduplicationKey);
     expect(assets[0].originalKey).not.toBe(assets[1].originalKey);
     expect(assets[0].displayKey).not.toBe(assets[1].displayKey);
     expect(assets[0].thumbnailKey).not.toBe(assets[1].thumbnailKey);
+    expect(assets[0].familyId).toBe("family-1");
+    expect(assets[1].familyId).toBe("family-2");
     expect(put).toHaveBeenCalledTimes(6);
   });
 
-  it("uses a shared asset lock helper for asset lifecycle transitions", async () => {
-    const service = new MediaService({} as PrismaService, {} as AlbumsService, {} as StorageService);
-    expect((service as unknown as { assetLockKey: (key: string) => string }).assetLockKey("enabled:family-1:abc")).toBe("asset:enabled:family-1:abc");
-  });
-
-  it("avoids duplicate uploads when two enabled completions race for the same asset", async () => {
-    process.env.MEDIA_DEDUPLICATION_ENABLED = "true";
+  it("processes identical files concurrently without sharing assets", async () => {
 
     const mediaRecords = [
       {
@@ -333,7 +297,6 @@ describe("media completion recovery", () => {
     ];
     const assets: Array<Record<string, unknown>> = [];
     const assetById = new Map<string, Record<string, unknown>>();
-    const assetByDeduplicationKey = new Map<string, Record<string, unknown>>();
     let assetReadyWrites = 0;
     let signalUploadStarted!: () => void;
     const uploadStarted = new Promise<void>((resolve) => {
@@ -347,30 +310,13 @@ describe("media completion recovery", () => {
       signalUploadStarted();
       await uploadGate;
     });
-    const upsertAsset = async ({ create }: { create: Record<string, unknown> }) => {
-      const key = create.deduplicationKey ? String(create.deduplicationKey) : null;
-      if (key && assetByDeduplicationKey.has(key)) {
-        return assetByDeduplicationKey.get(key)!;
-      }
-      const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED", updatedAt: new Date() };
+    const createAsset = async ({ data }: { data: Record<string, unknown> }) => {
+      const asset = { id: `asset-${assets.length + 1}`, ...data, updatedAt: new Date() };
       assets.push(asset);
       assetById.set(asset.id as string, asset);
-      if (key) assetByDeduplicationKey.set(key, asset);
       return asset;
     };
-    const updateAsset = async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
-      const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
-      if (!asset) throw new Error("ASSET_NOT_FOUND");
-      if (data.status === "READY") assetReadyWrites += 1;
-      Object.assign(asset, data);
-      assetById.set(asset.id as string, asset);
-      return asset;
-    };
-    const findAsset = async ({ where }: { where: { id?: string; deduplicationKey?: string } }) => {
-      if (where.id) return assetById.get(where.id) ?? null;
-      if (where.deduplicationKey) return assetByDeduplicationKey.get(where.deduplicationKey) ?? null;
-      return null;
-    };
+    const findAsset = async ({ where }: { where: { id: string } }) => assetById.get(where.id) ?? null;
     const updateManyAssets = async ({ where, data }: {
       where: { id: string; status?: string; updatedAt?: Date | { lt: Date } };
       data: Record<string, unknown>;
@@ -408,18 +354,11 @@ describe("media completion recovery", () => {
           return { ...current, mediaAsset: asset ?? null };
         }
       },
-      mediaAsset: {
-        findUnique: findAsset,
-        upsert: upsertAsset,
-        update: updateAsset,
-        updateMany: updateManyAssets
-      },
       $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
         $executeRaw: async () => undefined,
         mediaAsset: {
           findUnique: findAsset,
-          upsert: upsertAsset,
-          update: updateAsset,
+          create: createAsset,
           updateMany: updateManyAssets
         },
         media: {
@@ -450,16 +389,16 @@ describe("media completion recovery", () => {
     const first = service.complete("user-1", "media-1");
     await uploadStarted;
     const second = service.complete("user-1", "media-2");
-    await vi.waitFor(() => expect(mediaRecords[1].mediaAssetId).toBe("asset-1"));
-    expect(put).toHaveBeenCalledTimes(3);
+    await vi.waitFor(() => expect(put).toHaveBeenCalledTimes(6));
+    expect(mediaRecords[1].mediaAssetId).toBe("asset-2");
     uploadRelease?.();
     await expect(Promise.all([first, second])).resolves.toEqual([
       { mediaId: "media-1", status: "READY" },
       { mediaId: "media-2", status: "READY" }
     ]);
-    expect(assets).toHaveLength(1);
-    expect(put).toHaveBeenCalledTimes(3);
-    expect(assetReadyWrites).toBe(1);
+    expect(assets).toHaveLength(2);
+    expect(put).toHaveBeenCalledTimes(6);
+    expect(assetReadyWrites).toBe(2);
   });
 
   it("completes an MP4 upload with its generated thumbnail", async () => {
@@ -485,8 +424,8 @@ describe("media completion recovery", () => {
     const transaction = async (work: (tx: unknown) => Promise<unknown>) => work({
       $executeRaw: async () => undefined,
       mediaAsset: {
-        upsert: async ({ create }: { create: Record<string, unknown> }) => {
-          asset = { id: "asset-video", ...create, updatedAt: new Date() };
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          asset = { id: "asset-video", ...data, updatedAt: new Date() };
           return asset;
         },
         findUnique: async () => asset,
@@ -527,7 +466,6 @@ describe("media completion recovery", () => {
     const storage = {
       readVideo: async () => ({
         path: "input.mp4",
-        sha256: "hash",
         contentType: "video/mp4",
         cleanup
       }),
@@ -554,13 +492,12 @@ describe("media completion recovery", () => {
     const asset = {
       id: "asset-1",
       familyId: "family-1",
-      sha256: "hash",
       mimeType: "image/png",
       width: 1,
       height: 1,
-      originalKey: "assets/family-1/hash/original",
-      displayKey: "assets/family-1/hash/display.webp",
-      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
+      originalKey: "assets/family-1/media-1/original",
+      displayKey: "assets/family-1/media-1/display.webp",
+      thumbnailKey: "assets/family-1/media-1/thumbnail.webp",
       status: "ORPHANED",
       updatedAt: new Date()
     };
@@ -585,7 +522,7 @@ describe("media completion recovery", () => {
       $executeRaw: async () => undefined,
       mediaAsset: {
         findUnique: async () => storedAsset,
-        upsert: async () => {
+        create: async () => {
           storedAsset = asset;
           return storedAsset;
         },
@@ -666,13 +603,12 @@ describe("media completion recovery", () => {
     const asset = {
       id: "asset-1",
       familyId: "family-1",
-      sha256: "hash",
       mimeType: "image/png",
       width: 1,
       height: 1,
-      originalKey: "assets/family-1/hash/original",
-      displayKey: "assets/family-1/hash/display.webp",
-      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
+      originalKey: "assets/family-1/media-1/original",
+      displayKey: "assets/family-1/media-1/display.webp",
+      thumbnailKey: "assets/family-1/media-1/thumbnail.webp",
       status: "READY",
       updatedAt: new Date()
     };
@@ -696,7 +632,6 @@ describe("media completion recovery", () => {
       },
       mediaAsset: {
         findUnique: async () => asset,
-        upsert: async () => asset,
         update: async ({ data }: { data: Record<string, unknown> }) => {
           Object.assign(asset, data);
           return asset;
@@ -716,9 +651,20 @@ describe("media completion recovery", () => {
         const result = await work({
           $executeRaw: async () => undefined,
           mediaAsset: {
-            upsert: async () => asset,
+            create: async ({ data }: { data: Record<string, unknown> }) => {
+              Object.assign(asset, data);
+              return asset;
+            },
             findUnique: async () => asset,
-            updateMany: async () => ({ count: 0 }),
+            updateMany: async ({ where, data }: {
+              where: { status?: string | { in: string[] } };
+              data: Record<string, unknown>;
+            }) => {
+              const statuses = typeof where.status === "string" ? [where.status] : where.status?.in ?? [];
+              if (statuses.length > 0 && !statuses.includes(asset.status)) return { count: 0 };
+              Object.assign(asset, data);
+              return { count: 1 };
+            },
             update: async ({ data }: { data: Record<string, unknown> }) => {
               Object.assign(asset, data);
               return asset;
@@ -788,13 +734,12 @@ describe("media completion recovery", () => {
     const asset = {
       id: "asset-1",
       familyId: "family-1",
-      sha256: "hash",
       mimeType: "image/png",
       width: 1,
       height: 1,
-      originalKey: "assets/family-1/hash/original",
-      displayKey: "assets/family-1/hash/display.webp",
-      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
+      originalKey: "assets/family-1/media-1/original",
+      displayKey: "assets/family-1/media-1/display.webp",
+      thumbnailKey: "assets/family-1/media-1/thumbnail.webp",
       status: "READY",
       updatedAt: new Date()
     };
@@ -868,6 +813,12 @@ describe("media completion recovery", () => {
   });
 
   it("leaves an upload retryable while its matching asset is being deleted", async () => {
+    const asset = {
+      id: "asset-1",
+      familyId: "family-1",
+      status: "DELETING",
+      updatedAt: new Date()
+    };
     const media = {
       id: "media-1",
       albumId: "album-1",
@@ -876,16 +827,9 @@ describe("media completion recovery", () => {
       originalName: "baby.png",
       status: "PENDING_UPLOAD",
       tempObjectKey: "temp/family-1/media-1",
-      mediaAssetId: null as string | null,
+      mediaAssetId: asset.id as string | null,
       album: { id: "album-1", familyId: "family-1" },
-      mediaAsset: null
-    };
-    const asset = {
-      id: "asset-1",
-      familyId: "family-1",
-      sha256: "hash",
-      status: "DELETING",
-      updatedAt: new Date()
+      mediaAsset: asset
     };
     const updateMedia = (data: Record<string, unknown>) => {
       Object.assign(media, data);
@@ -902,7 +846,6 @@ describe("media completion recovery", () => {
         findUnique: async () => ({ ...media })
       },
       mediaAsset: {
-        upsert: async () => asset,
         findUnique: async () => asset,
         updateMany: async () => ({ count: 0 })
       }
@@ -934,6 +877,15 @@ describe("media completion recovery", () => {
   });
 
   it("reclaims an abandoned media-asset deletion when the same media is uploaded again", async () => {
+    const asset = {
+      id: "asset-1",
+      familyId: "family-1",
+      originalKey: "assets/family-1/media-1/original",
+      displayKey: "assets/family-1/media-1/display.webp",
+      thumbnailKey: "assets/family-1/media-1/thumbnail.webp",
+      status: "DELETING",
+      updatedAt: new Date(0)
+    };
     const media = {
       id: "media-1",
       albumId: "album-1",
@@ -942,19 +894,9 @@ describe("media completion recovery", () => {
       originalName: "baby.png",
       status: "PENDING_UPLOAD",
       tempObjectKey: "temp/family-1/media-1" as string | null,
-      mediaAssetId: null as string | null,
+      mediaAssetId: asset.id as string | null,
       album: { id: "album-1", familyId: "family-1" },
-      mediaAsset: null
-    };
-    const asset = {
-      id: "asset-1",
-      familyId: "family-1",
-      sha256: "hash",
-      originalKey: "assets/family-1/hash/original",
-      displayKey: "assets/family-1/hash/display.webp",
-      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      status: "DELETING",
-      updatedAt: new Date(0)
+      mediaAsset: asset
     };
     const updateMedia = (data: Record<string, unknown>) => {
       Object.assign(media, data);
@@ -963,10 +905,13 @@ describe("media completion recovery", () => {
     const tx = {
       $executeRaw: async () => undefined,
       mediaAsset: {
-        upsert: async () => asset,
         findUnique: async () => asset,
-        updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
-          if (where.status && asset.status !== where.status) return { count: 0 };
+        updateMany: async ({ where, data }: {
+          where: { status?: string | { in: string[] } };
+          data: Record<string, unknown>;
+        }) => {
+          const statuses = typeof where.status === "string" ? [where.status] : where.status?.in ?? [];
+          if (statuses.length > 0 && !statuses.includes(asset.status)) return { count: 0 };
           Object.assign(asset, data);
           return { count: 1 };
         },
@@ -1080,7 +1025,20 @@ describe("media completion recovery", () => {
           Object.assign(media, data);
           return media;
         }
-      }
+      },
+      $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+        media: {
+          updateMany: async ({ where, data }: {
+            where: { status?: string; updatedAt?: Date };
+            data: Record<string, unknown>;
+          }) => {
+            const ownsClaim = media.status === where.status && media.updatedAt === where.updatedAt;
+            if (ownsClaim) Object.assign(media, data);
+            return { count: ownsClaim ? 1 : 0 };
+          }
+        },
+        mediaAsset: { updateMany: async () => ({ count: 0 }) }
+      })
     } as unknown as PrismaService;
     const albums = { requireAlbum: async () => ({ album: media.album }) } as unknown as AlbumsService;
     const storage = {
@@ -1171,7 +1129,11 @@ describe("media completion recovery", () => {
         findUnique: async () => ({ ...media }),
         updateMany: async () => ({ count: 1 }),
         update: async () => ({ ...media, status: "FAILED" })
-      }
+      },
+      $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+        media: { updateMany: async () => ({ count: 1 }) },
+        mediaAsset: { updateMany: async () => ({ count: 0 }) }
+      })
     } as unknown as PrismaService;
     const storage = {
       read: async () => ({ bytes: oversizedJpegHeader, contentType: "image/jpeg" })
@@ -1242,39 +1204,97 @@ describe("media completion recovery", () => {
   });
 
   it("does not process the same upload twice concurrently", async () => {
-    const pending = {
+    const media = {
       id: "media-1",
       albumId: "album-1",
       uploadedById: "user-1",
       albumDate: new Date("2026-08-03T00:00:00.000Z"),
+      originalName: "baby.png",
+      uploadContentType: "image/png",
+      uploadSize: png.length,
       status: "PENDING_UPLOAD",
       tempObjectKey: "temp/family-1/media-1",
+      mediaAssetId: null as string | null,
+      failureReason: null as string | null,
+      updatedAt: new Date(),
       album: { id: "album-1", familyId: "family-1" },
-      mediaAsset: null
+      mediaAsset: null as Record<string, unknown> | null
     };
-    let lookupCount = 0;
-    const read = vi.fn(async () => ({ bytes: png, contentType: "image/png" }));
-    const prisma = {
-      album: { findUnique: async () => pending.album },
-      familyMember: {
-        findUnique: async () => ({ familyId: "family-1", userId: "user-1", role: "OWNER" })
-      },
-      media: {
-        findUnique: async () => ({
-          ...pending,
-          status: lookupCount++ === 0 ? "PENDING_UPLOAD" : "PROCESSING"
-        }),
-        updateMany: async () => ({ count: 0 }),
-        update: async () => ({ ...pending, status: "PROCESSING" })
+    let asset: Record<string, unknown> | null = null;
+    const updateMany = async ({ where, data }: {
+      where: { OR?: unknown; status?: string; updatedAt?: Date };
+      data: Record<string, unknown>;
+    }) => {
+      if (where.OR) {
+        if (media.status !== "PENDING_UPLOAD") return { count: 0 };
+      } else if (
+        (where.status && media.status !== where.status)
+        || (where.updatedAt && media.updatedAt !== where.updatedAt)
+      ) {
+        return { count: 0 };
       }
+      Object.assign(media, data);
+      return { count: 1 };
+    };
+    const tx = {
+      $executeRaw: async () => undefined,
+      media: {
+        findUnique: async () => ({ ...media, mediaAsset: asset }),
+        updateMany
+      },
+      mediaAsset: {
+        create: async ({ data }: { data: Record<string, unknown> }) => {
+          asset = { id: "asset-1", ...data, updatedAt: new Date() };
+          return asset;
+        },
+        findUnique: async () => asset,
+        updateMany: async ({ where, data }: {
+          where: { status?: string };
+          data: Record<string, unknown>;
+        }) => {
+          if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
+          Object.assign(asset, data);
+          return { count: 1 };
+        }
+      },
+      dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
+    };
+    const prisma = {
+      media: {
+        findUnique: async () => ({ ...media, mediaAsset: asset }),
+        updateMany,
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(media, data);
+          return { ...media, mediaAsset: asset };
+        }
+      },
+      $transaction: async (work: (client: typeof tx) => Promise<unknown>) => work(tx)
     } as unknown as PrismaService;
-    const storage = { read } as unknown as StorageService;
-    const families = new FamiliesService(prisma);
-    const albums = new AlbumsService(prisma, families);
+    const albums = {
+      requireAlbum: async () => ({ album: media.album, membership: { role: "OWNER" } })
+    } as unknown as AlbumsService;
+    let signalReadStarted!: () => void;
+    const readStarted = new Promise<void>((resolve) => { signalReadStarted = resolve; });
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const read = vi.fn(async () => {
+      signalReadStarted();
+      await readGate;
+      return { bytes: png, contentType: "image/png" };
+    });
+    const put = vi.fn(async () => undefined);
+    const storage = { read, put, delete: async () => undefined } as unknown as StorageService;
     const mediaItems = new MediaService(prisma, albums, storage);
 
-    await expect(mediaItems.complete("user-1", "media-1")).rejects.toBeInstanceOf(ConflictException);
-    expect(read).not.toHaveBeenCalled();
+    const first = mediaItems.complete("user-1", media.id);
+    await readStarted;
+    await expect(mediaItems.complete("user-1", media.id)).rejects.toBeInstanceOf(ConflictException);
+    releaseRead();
+    await expect(first).resolves.toEqual({ mediaId: media.id, status: "READY" });
+    expect(read).toHaveBeenCalledOnce();
+    expect(put).toHaveBeenCalledTimes(3);
+    expect(asset).toMatchObject({ id: "asset-1", status: "READY" });
+    expect(media).toMatchObject({ status: "READY", mediaAssetId: "asset-1" });
   });
 
   it("rejects a supported MIME type when the decoded image format is unsupported", async () => {
@@ -1297,7 +1317,11 @@ describe("media completion recovery", () => {
         findUnique: async () => media,
         updateMany: async () => ({ count: 1 }),
         update: async ({ data }: { data: Record<string, unknown> }) => ({ ...media, ...data })
-      }
+      },
+      $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+        media: { updateMany: async () => ({ count: 1 }) },
+        mediaAsset: { updateMany: async () => ({ count: 0 }) }
+      })
     } as unknown as PrismaService;
     const storage = {
       read: async () => ({
@@ -1393,9 +1417,9 @@ describe("media completion recovery", () => {
       status: "READY",
       tempObjectKey: null,
       mediaAsset: {
-        originalKey: "assets/family-1/hash/original",
-        displayKey: "assets/family-1/hash/display.webp",
-        thumbnailKey: "assets/family-1/hash/thumbnail.webp"
+        originalKey: "assets/family-1/media-1/original",
+        displayKey: "assets/family-1/media-1/display.webp",
+        thumbnailKey: "assets/family-1/media-1/thumbnail.webp"
       }
     };
     let lookupCount = 0;
@@ -1927,9 +1951,9 @@ describe("private media URL authorization", () => {
       return {
         originalName: "baby.jpg",
         mediaAsset: {
-          originalKey: "assets/family-1/hash/original",
-          displayKey: "assets/family-1/hash/display.webp",
-          thumbnailKey: "assets/family-1/hash/thumbnail.webp"
+          originalKey: "assets/family-1/media-1/original",
+          displayKey: "assets/family-1/media-1/display.webp",
+          thumbnailKey: "assets/family-1/media-1/thumbnail.webp"
         }
       };
     });
@@ -1990,7 +2014,7 @@ describe("daily representative serialization", () => {
 });
 
 describe("unfinished media deletion", () => {
-  it("deletes the stored asset when the removed media is its last active reference", async () => {
+  it("deletes only the owned asset and keeps repeated cleanup idempotent", async () => {
     const media = {
       id: "media-1",
       albumId: "album-1",
@@ -2004,11 +2028,9 @@ describe("unfinished media deletion", () => {
     const asset = {
       id: "asset-1",
       familyId: "family-1",
-      sha256: "hash",
-      originalKey: "assets/family-1/hash/original",
-      displayKey: "assets/family-1/hash/display.webp",
-      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      deduplicationKey: "enabled:family-1:hash",
+      originalKey: "assets/family-1/media-1/original",
+      displayKey: "assets/family-1/media-1/display.webp",
+      thumbnailKey: "assets/family-1/media-1/thumbnail.webp",
       status: "READY",
       updatedAt: new Date()
     };
@@ -2032,7 +2054,10 @@ describe("unfinished media deletion", () => {
             },
             media: {
               count: async () => 0,
-              updateMany: async () => ({ count: 1 }),
+              updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+                Object.assign(media, data);
+                return { count: 1 };
+              },
               findFirst: async () => null
             },
             mediaAsset: {
@@ -2064,8 +2089,9 @@ describe("unfinished media deletion", () => {
     const mediaItems = new MediaService(prisma, albums, storage);
 
     await expect(mediaItems.remove("user-1", media.id)).resolves.toEqual({ ok: true });
+    await expect(mediaItems.remove("user-1", media.id)).resolves.toEqual({ ok: true });
     expect(deleteObject).toHaveBeenCalledTimes(3);
-    expect(deleteAsset).toHaveBeenCalled();
+    expect(deleteAsset).toHaveBeenCalledOnce();
   });
 
   it("reports logical deletion as successful when storage cleanup is pending", async () => {
@@ -2081,11 +2107,9 @@ describe("unfinished media deletion", () => {
     const asset = {
       id: "asset-1",
       familyId: "family-1",
-      sha256: "hash",
-      originalKey: "assets/family-1/hash/original",
-      displayKey: "assets/family-1/hash/display.webp",
-      thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      deduplicationKey: "enabled:family-1:hash",
+      originalKey: "assets/family-1/media-1/original",
+      displayKey: "assets/family-1/media-1/display.webp",
+      thumbnailKey: "assets/family-1/media-1/thumbnail.webp",
       status: "READY",
       updatedAt: new Date()
     };

@@ -36,11 +36,6 @@ enum AssetStatus {
   DELETING
 }
 
-enum DeduplicationMode {
-  ENABLED
-  DISABLED
-}
-
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -128,33 +123,27 @@ model ChildTag {
 }
 
 model MediaAsset {
-  id                  String              @id @default(cuid())
-  familyId            String
-  sha256              String
-  deduplicationMode   DeduplicationMode   @default(ENABLED)
-  deduplicationKey    String              @unique
-  mimeType            String
-  width               Int
-  height              Int
-  originalKey         String
-  displayKey          String
-  thumbnailKey        String
-  status              AssetStatus         @default(READY)
-  createdAt           DateTime            @default(now())
-  updatedAt           DateTime            @updatedAt
-  family              Family              @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  mediaItems          Media[]
+  id           String      @id @default(cuid())
+  familyId     String
+  mimeType     String
+  width        Int
+  height       Int
+  originalKey  String
+  displayKey   String
+  thumbnailKey String
+  status       AssetStatus @default(READY)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  family       Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  mediaItem    Media?
 
   @@index([familyId])
-  @@index([familyId, sha256])
-  @@index([familyId, deduplicationMode])
-  @@index([sha256])
 }
 
 model Media {
   id             String      @id @default(cuid())
   albumId        String
-  mediaAssetId   String?
+  mediaAssetId   String?     @unique
   uploadedById   String
   albumDate      DateTime    @db.Date
   capturedAt     DateTime?
@@ -177,7 +166,6 @@ model Media {
   @@unique([albumId, clientUploadId])
   @@index([albumId, albumDate, status])
   @@index([albumId, status, albumDate(sort: Desc), createdAt(sort: Desc), id(sort: Desc)], map: "Media_feed_idx")
-  @@index([mediaAssetId])
 }
 
 model MediaChildTag {

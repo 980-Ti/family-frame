@@ -9,7 +9,7 @@ import {
   OnModuleInit,
   ServiceUnavailableException
 } from "@nestjs/common";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { PrismaService } from "../common/prisma.service.js";
 import { parseAlbumDate } from "../common/album-date.js";
@@ -22,7 +22,6 @@ import { AlbumsService } from "../albums/albums.service.js";
 import { assertDailyMediaCapacity, canDeleteMedia } from "./policies.js";
 import { StorageObjectError, StorageService } from "./storage.service.js";
 import type { StartUploadDto } from "./media.dto.js";
-import { env } from "../common/env.js";
 import {
   InvalidVideoError,
   processMp4,
@@ -31,9 +30,6 @@ import {
 
 const ACTIVE_STATUSES = ["PENDING_UPLOAD", "PROCESSING", "READY"] as const;
 const UPLOAD_EXPIRY_MS = 30 * 60 * 1000;
-const ASSET_UPLOAD_EXPIRY_MS = 15 * 60 * 1000;
-const ASSET_WAIT_MAX_MS = 60_000;
-const ASSET_WAIT_POLL_MS = 200;
 const ASSET_DELETION_EXPIRY_MS = 2 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60_000;
 const CLEANUP_BATCH_SIZE = 25;
@@ -41,8 +37,6 @@ const MAX_IMAGE_PIXELS = 60_000_000;
 const MAX_CONCURRENT_MEDIA_PROCESSING = 2;
 let activeMediaProcessing = 0;
 const mediaProcessingWaiters: Array<() => void> = [];
-
-type AssetWaitResult = "READY" | "STALE" | "ORPHANED" | "DELETING" | "MISSING" | "TIMEOUT";
 
 async function acquireMediaProcessingSlot(): Promise<() => void> {
   if (activeMediaProcessing >= MAX_CONCURRENT_MEDIA_PROCESSING) {
@@ -72,27 +66,6 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     private readonly storage: StorageService
   ) {}
 
-  private assetLockKey(deduplicationKey: string): string {
-    return `asset:${deduplicationKey}`;
-  }
-
-  private async waitForAssetReady(assetId: string): Promise<AssetWaitResult> {
-    const deadline = Date.now() + ASSET_WAIT_MAX_MS;
-    while (Date.now() < deadline) {
-      const asset = await this.prisma.mediaAsset.findUnique({
-        where: { id: assetId },
-        select: { status: true, updatedAt: true }
-      });
-      if (!asset) return "MISSING";
-      if (asset.status === "READY") return "READY";
-      if (asset.status === "ORPHANED") return "ORPHANED";
-      if (asset.status === "DELETING") return "DELETING";
-      if (asset.updatedAt < new Date(Date.now() - ASSET_UPLOAD_EXPIRY_MS)) return "STALE";
-      await new Promise((resolve) => setTimeout(resolve, ASSET_WAIT_POLL_MS));
-    }
-    return "TIMEOUT";
-  }
-
   onModuleInit(): void {
     // ponytail: each API replica runs this idempotent DB-backed sweep; use a dedicated worker only if cleanup volume grows.
     this.cleanupTimer = setInterval(() => void this.cleanupAbandonedMedia(), CLEANUP_INTERVAL_MS);
@@ -120,7 +93,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
             },
             { status: "READY", tempObjectKey: { not: null } },
             { status: "DELETED", tempObjectKey: { not: null } },
-            { status: "DELETED", mediaAsset: { is: { status: { in: ["READY", "ORPHANED"] } } } },
+            { status: "DELETED", mediaAsset: { is: { status: { in: ["READY", "ORPHANED", "UPLOADING"] } } } },
             {
               status: "DELETED",
               mediaAsset: { is: { status: "DELETING", updatedAt: { lt: deletionCutoff } } }
@@ -387,14 +360,8 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     // ponytail: process-local gate; move processing to a shared queue when API instances scale horizontally.
     const releaseMediaProcessingSlot = await acquireMediaProcessingSlot();
     let cleanupVideoSource: (() => Promise<void>) | undefined;
-    let ownsUploadClaim = false;
-    let waitedForExistingUpload = false;
-    let reusedExistingAsset = false;
-    let recoveredStaleUpload = false;
-    let performedStorageUpload = false;
-    let claimedAssetId: string | null = null;
-    let claimedAssetUpdatedAt: Date | null = null;
-    let claimedDeduplicationKey: string | null = null;
+    let assetIdForRecovery: string | null = null;
+    let assetNeedsUpload = false;
     try {
     const claimTime = new Date();
     const claimMedia = (tx: PrismaService, allowFailed = false) => tx.media.updateMany({
@@ -445,24 +412,14 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     try {
       let sourceBytes: Buffer | null = null;
       let videoSource: Awaited<ReturnType<StorageService["readVideo"]>> | null = null;
-      let sha256: string;
       if (media.uploadContentType === "video/mp4") {
         videoSource = await this.storage.readVideo(media.tempObjectKey);
         cleanupVideoSource = videoSource.cleanup;
-        sha256 = videoSource.sha256;
       } else {
         const source = await this.storage.read(media.tempObjectKey);
         sourceBytes = source.bytes;
-        sha256 = createHash("sha256").update(sourceBytes).digest("hex");
       }
-      const deduplicationEnabled = env.mediaDeduplicationEnabled;
-      const deduplicationMode = deduplicationEnabled ? "ENABLED" : "DISABLED";
-      const prefix = deduplicationEnabled
-        ? `assets/${media.album.familyId}/${sha256}`
-        : `assets/${media.album.familyId}/no-dedup/${media.id}/${sha256}`;
-      const deduplicationKey = deduplicationEnabled
-        ? `enabled:${media.album.familyId}:${sha256}`
-        : `disabled:${media.id}`;
+      const prefix = `assets/${media.album.familyId}/${media.id}`;
       let mimeType: string;
       let width: number;
       let height: number;
@@ -550,43 +507,57 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         displayKey = `${prefix}/display.webp`;
       }
 
-      claimedDeduplicationKey = deduplicationKey;
       const reservation = await this.prisma.$transaction(async (tx) => {
-        const assetLockKey = this.assetLockKey(deduplicationKey);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
-        await tx.mediaAsset.upsert({
-          where: { deduplicationKey },
-          update: {},
-          create: {
-            familyId: media.album.familyId,
-            sha256,
-            deduplicationMode,
-            deduplicationKey,
-            mimeType,
-            width,
-            height,
-            originalKey,
-            displayKey,
-            thumbnailKey,
-            status: "ORPHANED"
-          }
+        const current = await tx.media.findUnique({
+          where: { id: media.id },
+          include: { mediaAsset: true }
         });
-        let asset = await tx.mediaAsset.findUnique({ where: { deduplicationKey } });
-        if (!asset) {
-          throw new ServiceUnavailableException({
-            code: "MEDIA_ASSET_MISSING",
-            message: "미디어 에셋을 찾을 수 없습니다. 잠시 후 다시 시도해주세요."
+        if (
+          !current
+          || current.status !== "PROCESSING"
+          || current.updatedAt.getTime() !== claimTime.getTime()
+        ) {
+          throw new ConflictException({
+            code: "MEDIA_STATE_CHANGED",
+            message: "미디어 상태가 변경되어 처리를 완료하지 않았습니다."
           });
         }
-        const uploadCutoff = new Date(Date.now() - ASSET_UPLOAD_EXPIRY_MS);
-        const deletionCutoff = new Date(Date.now() - ASSET_DELETION_EXPIRY_MS);
-        if (asset.status === "DELETING") {
-          if (asset.updatedAt >= deletionCutoff) {
-            throw new ServiceUnavailableException({
-              code: "MEDIA_ASSET_DELETING",
-              message: "미디어 에셋을 정리하고 있습니다. 잠시 후 다시 시도해주세요."
+
+        let asset = current.mediaAsset;
+        if (!asset) {
+          asset = await tx.mediaAsset.create({
+            data: {
+              familyId: media.album.familyId,
+              mimeType,
+              width,
+              height,
+              originalKey,
+              displayKey,
+              thumbnailKey,
+              status: "UPLOADING"
+            }
+          });
+          const reserved = await tx.media.updateMany({
+            where: {
+              id: media.id,
+              status: "PROCESSING",
+              updatedAt: claimTime,
+              mediaAssetId: null
+            },
+            data: { mediaAssetId: asset.id, updatedAt: claimTime }
+          });
+          if (reserved.count === 0) {
+            throw new ConflictException({
+              code: "MEDIA_STATE_CHANGED",
+              message: "미디어 상태가 변경되어 처리를 완료하지 않았습니다."
             });
           }
+          return { asset, needsUpload: true };
+        }
+
+        if (asset.status === "READY") return { asset, needsUpload: false };
+        if (asset.status === "DELETING") {
+          const deletionCutoff = new Date(Date.now() - ASSET_DELETION_EXPIRY_MS);
           const recovered = await tx.mediaAsset.updateMany({
             where: { id: asset.id, status: "DELETING", updatedAt: { lt: deletionCutoff } },
             data: { status: "ORPHANED" }
@@ -605,52 +576,29 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
             });
           }
         }
-        const assetClaimTime = new Date();
-        if (asset.status === "ORPHANED") {
-          const claimed = await tx.mediaAsset.updateMany({
-            where: { id: asset.id, status: "ORPHANED" },
-            data: { status: "UPLOADING", updatedAt: assetClaimTime }
-          });
-          ownsUploadClaim = claimed.count === 1;
-        } else if (asset.status === "UPLOADING" && asset.updatedAt < uploadCutoff) {
-          const reclaimed = await tx.mediaAsset.updateMany({
-            where: { id: asset.id, status: "UPLOADING", updatedAt: { lt: uploadCutoff } },
-            data: { status: "UPLOADING", updatedAt: assetClaimTime }
-          });
-          ownsUploadClaim = reclaimed.count === 1;
-          recoveredStaleUpload = ownsUploadClaim;
-        } else if (asset.status === "UPLOADING") {
-          waitedForExistingUpload = true;
-        } else if (asset.status === "READY") {
-          reusedExistingAsset = true;
-        }
-        if (ownsUploadClaim) {
-          asset = await tx.mediaAsset.findUnique({ where: { id: asset.id } });
-          if (!asset) {
-            throw new ServiceUnavailableException({
-              code: "MEDIA_ASSET_MISSING",
-              message: "미디어 에셋을 찾을 수 없습니다. 잠시 후 다시 시도해주세요."
-            });
+        const prepared = await tx.mediaAsset.updateMany({
+          where: { id: asset.id, status: { in: ["ORPHANED", "UPLOADING"] } },
+          data: {
+            mimeType,
+            width,
+            height,
+            originalKey,
+            displayKey,
+            thumbnailKey,
+            status: "UPLOADING"
           }
-          claimedAssetId = asset.id;
-          claimedAssetUpdatedAt = assetClaimTime;
-        } else if (!reusedExistingAsset && !waitedForExistingUpload) {
-          waitedForExistingUpload = true;
-        }
-        const reserved = await tx.media.updateMany({
-          where: { id: media.id, status: "PROCESSING", updatedAt: claimTime },
-          data: { mediaAssetId: asset.id, updatedAt: claimTime }
         });
-        if (reserved.count === 0) {
+        if (prepared.count === 0) {
           throw new ConflictException({
-            code: "MEDIA_STATE_CHANGED",
-            message: "미디어 상태가 변경되어 처리를 완료하지 않았습니다."
+            code: "MEDIA_ASSET_STATE_CHANGED",
+            message: "미디어 에셋 상태가 변경되었습니다."
           });
         }
-        return { asset };
+        return { asset: { ...asset, status: "UPLOADING" as const }, needsUpload: true };
       });
-      performedStorageUpload = ownsUploadClaim;
-      if (ownsUploadClaim) {
+      assetIdForRecovery = reservation.asset.id;
+      assetNeedsUpload = reservation.needsUpload;
+      if (assetNeedsUpload) {
         await Promise.all([
           videoSource
             ? this.storage.copy(media.tempObjectKey, originalKey, mimeType)
@@ -659,44 +607,19 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           this.storage.put(thumbnailKey, thumbnail, "image/webp")
         ]);
       }
-      if (!ownsUploadClaim && !reusedExistingAsset) {
-        const waitResult = await this.waitForAssetReady(reservation.asset.id);
-        if (waitResult !== "READY") {
-          const code = waitResult === "DELETING"
-            ? "MEDIA_ASSET_DELETING"
-            : waitResult === "MISSING"
-              ? "MEDIA_ASSET_MISSING"
-              : waitResult === "STALE" || waitResult === "ORPHANED"
-                ? "MEDIA_ASSET_UPLOAD_STALE"
-                : "MEDIA_ASSET_UPLOAD_TIMEOUT";
-          throw new ServiceUnavailableException({
-            code,
-            message: "미디어 에셋 준비를 기다리는 중입니다. 잠시 후 다시 시도해주세요."
-          });
-        }
-      }
       const ready = await this.prisma.$transaction(async (tx) => {
-        const assetLockKey = this.assetLockKey(deduplicationKey);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
         const lockKey = `${media.albumId}:${media.albumDate.toISOString().slice(0, 10)}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
-        if (ownsUploadClaim) {
+        if (assetNeedsUpload) {
           const assetReady = await tx.mediaAsset.updateMany({
-            where: {
-              id: reservation.asset.id,
-              status: "UPLOADING",
-              updatedAt: claimedAssetUpdatedAt ?? undefined
-            },
+            where: { id: reservation.asset.id, status: "UPLOADING" },
             data: { status: "READY" }
           });
           if (assetReady.count === 0) {
-            const currentAsset = await tx.mediaAsset.findUnique({ where: { id: reservation.asset.id } });
-            if (currentAsset?.status !== "READY") {
-              throw new ConflictException({
-                code: "MEDIA_ASSET_CLAIM_LOST",
-                message: "미디어 에셋 업로드 선점이 변경되었습니다."
-              });
-            }
+            throw new ConflictException({
+              code: "MEDIA_ASSET_STATE_CHANGED",
+              message: "미디어 에셋 상태가 변경되었습니다."
+            });
           }
         } else {
           const currentAsset = await tx.mediaAsset.findUnique({ where: { id: reservation.asset.id } });
@@ -707,9 +630,9 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
             });
           }
           if (currentAsset.status !== "READY") {
-            throw new ServiceUnavailableException({
-              code: currentAsset.status === "DELETING" ? "MEDIA_ASSET_DELETING" : "MEDIA_ASSET_UPLOAD_TIMEOUT",
-              message: "미디어 에셋 준비를 기다리는 중입니다. 잠시 후 다시 시도해주세요."
+            throw new ConflictException({
+              code: "MEDIA_ASSET_STATE_CHANGED",
+              message: "미디어 에셋 상태가 변경되었습니다."
             });
           }
         }
@@ -736,7 +659,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         return completed;
       });
       const completed = await this.cleanupTempObject(ready);
-      this.logger.log(`media-complete mediaId=${media.id} familyId=${media.album.familyId} mediaAssetId=${reservation.asset.id} deduplicationMode=${deduplicationMode} deduplicationEnabled=${deduplicationEnabled} deduplicationHit=${reusedExistingAsset || waitedForExistingUpload} ownsUploadClaim=${ownsUploadClaim} reusedExistingAsset=${reusedExistingAsset} waitedForExistingUpload=${waitedForExistingUpload} recoveredStaleUpload=${recoveredStaleUpload} performedStorageUpload=${performedStorageUpload} sha256Prefix=${sha256.slice(0, 12)} uploadSize=${media.uploadSize} mediaType=${videoSource ? "video" : "image"} processingDurationMs=${Date.now() - claimTime.getTime()}`);
+      this.logger.log(`media-complete mediaId=${media.id} familyId=${media.album.familyId} mediaAssetId=${reservation.asset.id} uploadSize=${media.uploadSize} mediaType=${videoSource ? "video" : "image"} processingDurationMs=${Date.now() - claimTime.getTime()}`);
       return { mediaId: completed.id, status: completed.status };
     } catch (error) {
       const inputError =
@@ -758,36 +681,31 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         response && typeof response === "object" && "code" in response && typeof response.code === "string"
           ? response.code
           : "MEDIA_PROCESSING_FAILED";
-      if (ownsUploadClaim && claimedAssetId && claimedAssetUpdatedAt && claimedDeduplicationKey) {
-        const recoveryAssetId = claimedAssetId;
-        const recoveryUpdatedAt = claimedAssetUpdatedAt;
-        const recoveryKey = claimedDeduplicationKey;
-        await this.prisma.$transaction(async (tx) => {
-          const lockKey = this.assetLockKey(recoveryKey);
-          await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
-          await tx.mediaAsset.updateMany({
-            where: { id: recoveryAssetId, status: "UPLOADING", updatedAt: recoveryUpdatedAt },
-            data: { status: "ORPHANED" }
-          });
-        }).catch(() => undefined);
-      }
       if (error instanceof ConflictException) throw error;
-      let failed;
       try {
-        failed = await this.prisma.media.updateMany({
-          where: { id: media.id, status: "PROCESSING", updatedAt: claimTime },
-          data: { status: "FAILED", failureReason: reason }
+        await this.prisma.$transaction(async (tx) => {
+          const failed = await tx.media.updateMany({
+            where: { id: media.id, status: "PROCESSING", updatedAt: claimTime },
+            data: { status: "FAILED", failureReason: reason }
+          });
+          if (failed.count === 0) {
+            throw new ConflictException({
+              code: "MEDIA_STATE_CHANGED",
+              message: "미디어 상태가 변경되어 실패 상태를 저장하지 않았습니다."
+            });
+          }
+          if (assetNeedsUpload && assetIdForRecovery) {
+            await tx.mediaAsset.updateMany({
+              where: { id: assetIdForRecovery, status: "UPLOADING" },
+              data: { status: "ORPHANED" }
+            });
+          }
         });
-      } catch {
+      } catch (persistenceError) {
+        if (persistenceError instanceof ConflictException) throw persistenceError;
         throw new ServiceUnavailableException({
           code: "MEDIA_PROCESSING_FAILED",
           message: "파일 처리 상태를 저장하지 못했습니다. 잠시 후 다시 시도해주세요."
-        });
-      }
-      if (failed.count === 0) {
-        throw new ConflictException({
-          code: "MEDIA_STATE_CHANGED",
-          message: "미디어 상태가 변경되어 실패 상태를 저장하지 않았습니다."
         });
       }
       if (inputError) throw inputError;
@@ -832,34 +750,9 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
   private async cleanupMediaAsset(mediaAssetId: string | null | undefined): Promise<void> {
     if (!mediaAssetId) return;
     const candidate = await this.prisma.$transaction(async (tx) => {
-      const initial = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
-      if (!initial) return null;
-      const lockKey = this.assetLockKey(initial.deduplicationKey);
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
-      let asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
+      const asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!asset) return null;
-      const activeReferences = await tx.media.count({
-        where: { mediaAssetId, status: { not: "DELETED" } }
-      });
-      if (activeReferences > 0) {
-        await tx.media.updateMany({
-          where: { mediaAssetId, status: "DELETED" },
-          data: { mediaAssetId: null }
-        });
-        return null;
-      }
-      const uploadCutoff = new Date(Date.now() - ASSET_UPLOAD_EXPIRY_MS);
       const deletionCutoff = new Date(Date.now() - ASSET_DELETION_EXPIRY_MS);
-      if (asset.status === "UPLOADING") {
-        if (asset.updatedAt >= uploadCutoff) return null;
-        const orphaned = await tx.mediaAsset.updateMany({
-          where: { id: mediaAssetId, status: "UPLOADING", updatedAt: { lt: uploadCutoff } },
-          data: { status: "ORPHANED" }
-        });
-        if (orphaned.count === 0) return null;
-        asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
-        if (!asset) return null;
-      }
       const deletionClaimTime = new Date();
       if (asset.status === "DELETING") {
         if (asset.updatedAt >= deletionCutoff) return null;
@@ -868,7 +761,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           data: { status: "DELETING", updatedAt: deletionClaimTime }
         });
         if (reclaimed.count === 0) return null;
-      } else if (asset.status === "READY" || asset.status === "ORPHANED") {
+      } else if (["READY", "ORPHANED", "UPLOADING"].includes(asset.status)) {
         const claimed = await tx.mediaAsset.updateMany({
           where: { id: mediaAssetId, status: asset.status },
           data: { status: "DELETING", updatedAt: deletionClaimTime }
@@ -887,8 +780,6 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     );
     if (deleted.some(({ status }) => status === "rejected")) {
       await this.prisma.$transaction(async (tx) => {
-        const lockKey = this.assetLockKey(candidate.deduplicationKey);
-        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
         await tx.mediaAsset.updateMany({
           where: { id: mediaAssetId, status: "DELETING", updatedAt: candidate.updatedAt },
           data: { status: "ORPHANED" }
@@ -901,8 +792,6 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      const lockKey = this.assetLockKey(candidate.deduplicationKey);
-      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!asset || asset.status !== "DELETING" || asset.updatedAt.getTime() !== candidate.updatedAt.getTime()) return;
       await tx.media.updateMany({

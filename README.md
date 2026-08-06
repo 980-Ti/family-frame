@@ -21,28 +21,21 @@ npx --yes pnpm@10.15.0 dev:all
 
 `.env`는 커밋하지 않습니다. 운영에서는 `DATABASE_URL`, `APP_ORIGIN`, `API_ORIGIN`, `S3_*` 주소와 자격증명을 모두 실제 환경에 맞게 설정합니다.
 
-## Media deduplication experiment mode
+## 미디어 업로드 구조
 
-`MEDIA_DEDUPLICATION_ENABLED`는 실험용 환경변수로 기본값은 `true`입니다. `false`는 운영 기능이 아니라 실험용 baseline이며, 동일한 파일이라도 각 Media마다 별도의 MediaAsset와 RGW 객체 경로를 생성합니다. 해시 계산, 이미지 변환, 영상 처리, DB 상태 전이, 업로드 API 흐름은 그대로 유지됩니다.
+각 Media는 자신만의 MediaAsset과 비공개 RGW 객체 세트를 가집니다. 브라우저가 presigned URL로 임시 객체를 올리면 백엔드가 파일을 검증하고 이미지 또는 영상을 처리한 뒤 `assets/{familyId}/{mediaId}` 아래에 original, display, thumbnail을 저장합니다. 파일 내용이 같아도 다른 Media의 Asset이나 객체를 조회하거나 공유하지 않습니다.
 
-- 활성화(`true`): 같은 가족의 동일 파일은 기존 MediaAsset을 재사용하고 RGW 업로드를 생략합니다. 동시에 완료되는 두 요청도 같은 에셋에 대해 한 번만 업로드를 수행하도록 보장합니다.
-- 비활성화(`false`): 같은 가족의 동일 파일도 별도의 MediaAsset과 RGW 객체를 생성합니다.
-- 실험 A/B 사이에는 DB와 RGW 데이터를 초기화하거나 별도 DB/Bucket를 사용해야 공정한 비교가 가능합니다.
-- 동일 데이터셋, 동일 순서, 동일 동시성 조건으로 반복 실험하는 것을 권장합니다.
-- 배포 시에는 새 마이그레이션 파일 [backend/prisma/migrations/20260806010000_media_asset_uploading/migration.sql](backend/prisma/migrations/20260806010000_media_asset_uploading/migration.sql)과 함께 `prisma migrate deploy`가 실행되도록 해야 합니다.
+`20260806020000_remove_media_deduplication` migration은 `Media.mediaAssetId`를 1:1 관계로 변경합니다. 기존 DB에 하나의 MediaAsset을 참조하는 Media가 둘 이상 있으면 migration은 데이터를 임의 삭제하거나 분리하지 않고 중단됩니다. 배포 전에 다음 쿼리 결과가 비어 있는지 확인하고, 결과가 있으면 보존할 객체와 Media를 운영 정책에 따라 수동 전환해야 합니다.
 
-```powershell
-$env:MEDIA_DEDUPLICATION_ENABLED = "true"
-# 또는
-$env:MEDIA_DEDUPLICATION_ENABLED = "false"
+```sql
+SELECT "mediaAssetId", COUNT(*)
+FROM "Media"
+WHERE "mediaAssetId" IS NOT NULL
+GROUP BY "mediaAssetId"
+HAVING COUNT(*) > 1;
 ```
 
-Helm override 예시는 다음과 같습니다.
-
-```powershell
-helm upgrade --install family-frame ... --set config.mediaDeduplicationEnabled=true
-helm upgrade --install family-frame ... --set config.mediaDeduplicationEnabled=false
-```
+결과가 있으면 첫 Media가 기존 Asset을 유지하도록 정한 뒤, 나머지 Media마다 RGW 객체를 Media 전용 prefix로 복사하고 새 MediaAsset을 생성해 `mediaAssetId`를 교체합니다. 모든 공유 참조가 해소되고 위 쿼리 결과가 비어 있을 때만 migration을 적용합니다. migration은 공유 참조가 남아 있으면 스키마를 변경하기 전에 중단됩니다.
 
 로컬 MinIO 초기화는 `temp/` 객체를 1일 뒤 만료하는 lifecycle을 매번 같은 설정으로 적용합니다. 운영 Ceph RGW의 `family-frame` bucket에도 `temp/` prefix를 1일 뒤 만료하는 동등한 S3 lifecycle을 반드시 설정해야 합니다. 애플리케이션의 best-effort 삭제와 별개로, 프로세스 종료 중 남은 임시 객체를 정리하는 안전망입니다.
 

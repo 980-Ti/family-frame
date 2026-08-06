@@ -9,7 +9,6 @@ import {
   S3Client
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -122,7 +121,6 @@ export class StorageService {
 
   async readVideo(key: string): Promise<{
     path: string;
-    sha256: string;
     contentType: "video/mp4";
     cleanup: () => Promise<void>;
   }> {
@@ -142,16 +140,12 @@ export class StorageService {
 
     const directory = await mkdtemp(join(tmpdir(), "family-frame-video-"));
     const path = join(directory, "input.mp4");
-    const hash = createHash("sha256");
     let size = 0;
     const limit = new Transform({
       transform(chunk: Buffer, _encoding, callback) {
         size += chunk.byteLength;
         if (size > MAX_VIDEO_UPLOAD_BYTES) callback(new StorageObjectError("FILE_TOO_LARGE"));
-        else {
-          hash.update(chunk);
-          callback(null, chunk);
-        }
+        else callback(null, chunk);
       }
     });
 
@@ -160,7 +154,6 @@ export class StorageService {
       if (size === 0) throw new StorageObjectError("EMPTY_OBJECT");
       return {
         path,
-        sha256: hash.digest("hex"),
         contentType: "video/mp4",
         cleanup: () => rm(directory, { recursive: true, force: true })
       };
