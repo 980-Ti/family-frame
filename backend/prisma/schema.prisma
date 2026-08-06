@@ -35,6 +35,11 @@ enum AssetStatus {
   DELETING
 }
 
+enum DeduplicationMode {
+  ENABLED
+  DISABLED
+}
+
 model User {
   id           String         @id @default(cuid())
   email        String         @unique
@@ -122,23 +127,27 @@ model ChildTag {
 }
 
 model MediaAsset {
-  id           String      @id @default(cuid())
-  familyId     String
-  sha256       String
-  mimeType     String
-  width        Int
-  height       Int
-  originalKey  String
-  displayKey   String
-  thumbnailKey String
-  status       AssetStatus @default(READY)
-  createdAt    DateTime    @default(now())
-  updatedAt    DateTime    @updatedAt
-  family       Family      @relation(fields: [familyId], references: [id], onDelete: Cascade)
-  mediaItems       Media[]
+  id                  String              @id @default(cuid())
+  familyId            String
+  sha256              String
+  deduplicationMode   DeduplicationMode   @default(ENABLED)
+  deduplicationKey    String              @unique
+  mimeType            String
+  width               Int
+  height              Int
+  originalKey         String
+  displayKey          String
+  thumbnailKey        String
+  status              AssetStatus         @default(READY)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  family              Family              @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  mediaItems          Media[]
 
-  @@unique([familyId, sha256])
   @@index([familyId])
+  @@index([familyId, sha256])
+  @@index([familyId, deduplicationMode])
+  @@index([sha256])
 }
 
 model Media {

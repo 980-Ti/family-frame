@@ -21,6 +21,28 @@ npx --yes pnpm@10.15.0 dev:all
 
 `.env`는 커밋하지 않습니다. 운영에서는 `DATABASE_URL`, `APP_ORIGIN`, `API_ORIGIN`, `S3_*` 주소와 자격증명을 모두 실제 환경에 맞게 설정합니다.
 
+## Media deduplication experiment mode
+
+`MEDIA_DEDUPLICATION_ENABLED`는 실험용 환경변수로 기본값은 `true`입니다. `false`는 운영 기능이 아니라 실험용 baseline이며, 동일한 파일이라도 각 Media마다 별도의 MediaAsset와 RGW 객체 경로를 생성합니다. 해시 계산, 이미지 변환, 영상 처리, DB 상태 전이, 업로드 API 흐름은 그대로 유지됩니다.
+
+- 활성화(`true`): 같은 가족의 동일 파일은 기존 MediaAsset을 재사용하고 RGW 업로드를 생략합니다.
+- 비활성화(`false`): 같은 가족의 동일 파일도 별도의 MediaAsset과 RGW 객체를 생성합니다.
+- 실험 A/B 사이에는 DB와 RGW 데이터를 초기화하거나 별도 DB/Bucket를 사용해야 공정한 비교가 가능합니다.
+- 동일 데이터셋, 동일 순서, 동일 동시성 조건으로 반복 실험하는 것을 권장합니다.
+
+```powershell
+$env:MEDIA_DEDUPLICATION_ENABLED = "true"
+# 또는
+$env:MEDIA_DEDUPLICATION_ENABLED = "false"
+```
+
+Helm override 예시는 다음과 같습니다.
+
+```powershell
+helm upgrade --install family-frame ... --set config.mediaDeduplicationEnabled=true
+helm upgrade --install family-frame ... --set config.mediaDeduplicationEnabled=false
+```
+
 로컬 MinIO 초기화는 `temp/` 객체를 1일 뒤 만료하는 lifecycle을 매번 같은 설정으로 적용합니다. 운영 Ceph RGW의 `family-frame` bucket에도 `temp/` prefix를 1일 뒤 만료하는 동등한 S3 lifecycle을 반드시 설정해야 합니다. 애플리케이션의 best-effort 삭제와 별개로, 프로세스 종료 중 남은 임시 객체를 정리하는 안전망입니다.
 
 ## 검증

@@ -16,6 +16,19 @@ function positiveInteger(name: string, fallback: number): number {
   return value;
 }
 
+function boolean(name: string, fallback: boolean): boolean {
+  const value = process.env[name];
+  if (value === undefined) {
+    return fallback;
+  }
+  if (value === "") {
+    throw new Error(`${name} must be either true or false`);
+  }
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error(`${name} must be either true or false`);
+}
+
 export const env = {
   get port() {
     return positiveInteger("PORT", 4000);
@@ -34,6 +47,9 @@ export const env = {
   },
   get signedUrlTtl() {
     return positiveInteger("SIGNED_URL_TTL_SECONDS", 300);
+  },
+  get mediaDeduplicationEnabled() {
+    return boolean("MEDIA_DEDUPLICATION_ENABLED", true);
   },
   get s3() {
     return {

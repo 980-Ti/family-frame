@@ -13,3 +13,4 @@ data:
   S3_BUCKET: family-frame
   S3_FORCE_PATH_STYLE: "true"
   SIGNED_URL_TTL_SECONDS: "300"
+  MEDIA_DEDUPLICATION_ENABLED: "true"

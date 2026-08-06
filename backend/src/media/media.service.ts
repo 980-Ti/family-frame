@@ -22,6 +22,7 @@ import { AlbumsService } from "../albums/albums.service.js";
 import { assertDailyMediaCapacity, canDeleteMedia } from "./policies.js";
 import { StorageObjectError, StorageService } from "./storage.service.js";
 import type { StartUploadDto } from "./media.dto.js";
+import { env } from "../common/env.js";
 import {
   InvalidVideoError,
   processMp4,
@@ -420,7 +421,14 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         sourceBytes = source.bytes;
         sha256 = createHash("sha256").update(sourceBytes).digest("hex");
       }
-      const prefix = `assets/${media.album.familyId}/${sha256}`;
+      const deduplicationEnabled = env.mediaDeduplicationEnabled;
+      const deduplicationMode = deduplicationEnabled ? "ENABLED" : "DISABLED";
+      const prefix = deduplicationEnabled
+        ? `assets/${media.album.familyId}/${sha256}`
+        : `assets/${media.album.familyId}/no-dedup/${media.id}/${sha256}`;
+      const deduplicationKey = deduplicationEnabled
+        ? `enabled:${media.album.familyId}:${sha256}`
+        : `disabled:${media.id}`;
       let mimeType: string;
       let width: number;
       let height: number;
@@ -509,14 +517,16 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       }
 
       const reservation = await this.prisma.$transaction(async (tx) => {
-        const assetLockKey = `asset:${media.album.familyId}:${sha256}`;
+        const assetLockKey = `asset:${deduplicationKey}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
         let asset = await tx.mediaAsset.upsert({
-          where: { familyId_sha256: { familyId: media.album.familyId, sha256 } },
+          where: { deduplicationKey },
           update: {},
           create: {
             familyId: media.album.familyId,
             sha256,
+            deduplicationMode,
+            deduplicationKey,
             mimeType,
             width,
             height,
@@ -545,9 +555,13 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
             message: "미디어 상태가 변경되어 처리를 완료하지 않았습니다."
           });
         }
-        return { asset, needsUpload: asset.status !== "READY" };
+        return {
+          asset,
+          needsUpload: asset.status !== "READY"
+        };
       });
-      if (reservation.needsUpload) {
+      const performedStorageUpload = reservation.needsUpload;
+      if (performedStorageUpload) {
         await Promise.all([
           videoSource
             ? this.storage.copy(media.tempObjectKey, originalKey, mimeType)
@@ -557,7 +571,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         ]);
       }
       const ready = await this.prisma.$transaction(async (tx) => {
-        const assetLockKey = `asset:${media.album.familyId}:${sha256}`;
+        const assetLockKey = `asset:${deduplicationKey}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
         const lockKey = `${media.albumId}:${media.albumDate.toISOString().slice(0, 10)}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
@@ -588,6 +602,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         return completed;
       });
       const completed = await this.cleanupTempObject(ready);
+      this.logger.log(`media-complete mediaId=${media.id} familyId=${media.album.familyId} mediaAssetId=${reservation.asset.id} deduplicationMode=${deduplicationMode} deduplicationEnabled=${deduplicationEnabled} deduplicationHit=${!performedStorageUpload} sha256Prefix=${sha256.slice(0, 12)} uploadSize=${media.uploadSize} mediaType=${videoSource ? "video" : "image"} performedStorageUpload=${performedStorageUpload} processingDurationMs=${Date.now() - claimTime.getTime()}`);
       return { mediaId: completed.id, status: completed.status };
     } catch (error) {
       if (error instanceof ConflictException) throw error;
@@ -670,7 +685,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     const candidate = await this.prisma.$transaction(async (tx) => {
       const candidate = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!candidate) return null;
-      const lockKey = `asset:${candidate.familyId}:${candidate.sha256}`;
+      const lockKey = `asset:${candidate.familyId}:${candidate.deduplicationKey}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!asset) return null;
@@ -707,7 +722,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      const lockKey = `asset:${candidate.familyId}:${candidate.sha256}`;
+      const lockKey = `asset:${candidate.familyId}:${candidate.deduplicationKey}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!asset || asset.status !== "DELETING") return;

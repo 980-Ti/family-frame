@@ -25,6 +25,207 @@ const png = Buffer.from(
 describe("media completion recovery", () => {
   beforeEach(() => {
     processMp4Mock.mockReset();
+    delete process.env.MEDIA_DEDUPLICATION_ENABLED;
+  });
+
+  it("reuses an existing asset for duplicate images when deduplication is enabled", async () => {
+    process.env.MEDIA_DEDUPLICATION_ENABLED = "true";
+
+    const mediaStates = [
+      {
+        id: "media-1",
+        albumId: "album-1",
+        albumDate: new Date("2026-08-03T00:00:00.000Z"),
+        uploadedById: "user-1",
+        originalName: "baby.png",
+        uploadContentType: "image/png",
+        uploadSize: png.length,
+        tempObjectKey: "temp/family-1/media-1",
+        mediaAssetId: null as string | null,
+        status: "PENDING_UPLOAD",
+        failureReason: null as string | null,
+        album: { id: "album-1", familyId: "family-1" },
+        mediaAsset: null as Record<string, unknown> | null
+      },
+      {
+        id: "media-2",
+        albumId: "album-1",
+        albumDate: new Date("2026-08-03T00:00:00.000Z"),
+        uploadedById: "user-1",
+        originalName: "baby.png",
+        uploadContentType: "image/png",
+        uploadSize: png.length,
+        tempObjectKey: "temp/family-1/media-2",
+        mediaAssetId: null as string | null,
+        status: "PENDING_UPLOAD",
+        failureReason: null as string | null,
+        album: { id: "album-1", familyId: "family-1" },
+        mediaAsset: null as Record<string, unknown> | null
+      }
+    ];
+
+    const assets: Array<Record<string, unknown>> = [];
+    const tx = {
+      $executeRaw: async () => undefined,
+      mediaAsset: {
+        upsert: async ({ where, create }: { where: { deduplicationKey: string }; create: Record<string, unknown> }) => {
+          const existing = assets.find((item) => item.deduplicationKey === where.deduplicationKey);
+          if (existing) return existing;
+          const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
+          assets.push(asset);
+          return asset;
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const asset = assets.find((item) => item.id === where.id);
+          if (!asset) throw new Error("ASSET_NOT_FOUND");
+          Object.assign(asset, data);
+          return asset;
+        }
+      },
+      media: {
+        updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaStates.find((item) => item.id === where.id);
+          if (!current) return { count: 0 };
+          Object.assign(current, data);
+          return { count: 1 };
+        },
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          const current = mediaStates.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          const asset = assets.find((item) => item.id === current.mediaAssetId);
+          return { ...current, mediaAsset: asset ?? null };
+        }
+      },
+      dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
+    };
+    const prisma = {
+      media: {
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          const current = mediaStates.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          return { ...current, mediaAsset: current.mediaAssetId ? assets[0] : null };
+        },
+        updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaStates.find((item) => item.id === where.id);
+          if (!current) return { count: 0 };
+          Object.assign(current, data);
+          return { count: 1 };
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaStates.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          Object.assign(current, data);
+          return { ...current, mediaAsset: current.mediaAssetId ? assets[0] : null };
+        }
+      },
+      mediaAsset: {
+        findUnique: async () => assets[0] ?? null,
+        upsert: async ({ where, create }: { where: { deduplicationKey: string }; create: Record<string, unknown> }) => {
+          const existing = assets.find((item) => item.deduplicationKey === where.deduplicationKey);
+          if (existing) return existing;
+          const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
+          assets.push(asset);
+          return asset;
+        }
+      },
+      $transaction: async (work: (tx: Record<string, unknown>) => Promise<unknown>) => work(tx as unknown as Record<string, unknown>)
+    } as unknown as PrismaService;
+    const albums = { requireAlbum: async () => ({ album: { familyId: "family-1" } }) } as unknown as AlbumsService;
+    const put = vi.fn(async () => undefined);
+    const storage = {
+      read: async () => ({ bytes: png, contentType: "image/png" }),
+      put,
+      delete: async () => undefined
+    } as unknown as StorageService;
+    const service = new MediaService(prisma, albums, storage);
+
+    await expect(service.complete("user-1", "media-1")).resolves.toEqual({ mediaId: "media-1", status: "READY" });
+    await expect(service.complete("user-1", "media-2")).resolves.toEqual({ mediaId: "media-2", status: "READY" });
+
+    expect(assets).toHaveLength(1);
+    expect(put).toHaveBeenCalledTimes(3);
+  });
+
+  it("creates separate assets for duplicate images when deduplication is disabled", async () => {
+    process.env.MEDIA_DEDUPLICATION_ENABLED = "false";
+
+    const media = {
+      id: "media-1",
+      albumId: "album-1",
+      albumDate: new Date("2026-08-03T00:00:00.000Z"),
+      uploadedById: "user-1",
+      originalName: "baby.png",
+      uploadContentType: "image/png",
+      uploadSize: png.length,
+      tempObjectKey: "temp/family-1/media-1",
+      mediaAssetId: null as string | null,
+      status: "PENDING_UPLOAD",
+      album: { id: "album-1", familyId: "family-1" },
+      mediaAsset: null as Record<string, unknown> | null
+    };
+    const assets: Array<Record<string, unknown>> = [];
+    const prisma = {
+      media: {
+        findUnique: async () => ({ ...media, mediaAsset: null }),
+        updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(media, data);
+          return { count: 1 };
+        },
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(media, data);
+          return { ...media, mediaAsset: assets[0] ?? null };
+        }
+      },
+      mediaAsset: {
+        upsert: async ({ create }: { create: Record<string, unknown> }) => {
+          const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
+          assets.push(asset);
+          return asset;
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const asset = assets.find((item) => item.id === where.id);
+          if (!asset) throw new Error("ASSET_NOT_FOUND");
+          Object.assign(asset, data);
+          return asset;
+        }
+      },
+      $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+        $executeRaw: async () => undefined,
+        mediaAsset: {
+          upsert: async ({ create }: { create: Record<string, unknown> }) => {
+            const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
+            assets.push(asset);
+            return asset;
+          },
+          update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+            const asset = assets.find((item) => item.id === where.id);
+            if (!asset) throw new Error("ASSET_NOT_FOUND");
+            Object.assign(asset, data);
+            return asset;
+          }
+        },
+        media: {
+          updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+            Object.assign(media, data);
+            return { count: 1 };
+          },
+          findUnique: async () => ({ ...media, mediaAsset: assets[0] ?? null })
+        },
+        dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
+      })
+    } as unknown as PrismaService;
+    const albums = { requireAlbum: async () => ({ album: { familyId: "family-1" } }) } as unknown as AlbumsService;
+    const put = vi.fn(async () => undefined);
+    const storage = {
+      read: async () => ({ bytes: png, contentType: "image/png" }),
+      put,
+      delete: async () => undefined
+    } as unknown as StorageService;
+
+    const service = new MediaService(prisma, albums, storage);
+    await expect(service.complete("user-1", "media-1")).resolves.toEqual({ mediaId: "media-1", status: "READY" });
+    expect(assets).toHaveLength(1);
+    expect(put).toHaveBeenCalledTimes(3);
   });
 
   it("completes an MP4 upload with its generated thumbnail", async () => {
