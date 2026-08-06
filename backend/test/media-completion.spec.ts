@@ -75,6 +75,14 @@ describe("media completion recovery", () => {
           assets.push(asset);
           return asset;
         },
+        findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
+          assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
+        updateMany: async ({ where, data }: { where: { id: string; status?: string }; data: Record<string, unknown> }) => {
+          const asset = assets.find((item) => item.id === where.id);
+          if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
+          Object.assign(asset, data);
+          return { count: 1 };
+        },
         update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
           const asset = assets.find((item) => item.id === where.id);
           if (!asset) throw new Error("ASSET_NOT_FOUND");
@@ -119,7 +127,8 @@ describe("media completion recovery", () => {
         }
       },
       mediaAsset: {
-        findUnique: async () => assets[0] ?? null,
+        findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
+          assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
         upsert: async ({ where, create }: { where: { deduplicationKey: string }; create: Record<string, unknown> }) => {
           const existing = assets.find((item) => item.deduplicationKey === where.deduplicationKey);
           if (existing) return existing;
@@ -208,6 +217,14 @@ describe("media completion recovery", () => {
           assets.push(asset);
           return asset;
         },
+        findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
+          assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
+        updateMany: async ({ where, data }: { where: { id: string; status?: string }; data: Record<string, unknown> }) => {
+          const asset = assets.find((item) => item.id === where.id);
+          if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
+          Object.assign(asset, data);
+          return { count: 1 };
+        },
         update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
           const asset = assets.find((item) => item.id === where.id);
           if (!asset) throw new Error("ASSET_NOT_FOUND");
@@ -222,6 +239,14 @@ describe("media completion recovery", () => {
             const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED" };
             assets.push(asset);
             return asset;
+          },
+          findUnique: async ({ where }: { where: { id?: string; deduplicationKey?: string } }) =>
+            assets.find((item) => item.id === where.id || item.deduplicationKey === where.deduplicationKey) ?? null,
+          updateMany: async ({ where, data }: { where: { id: string; status?: string }; data: Record<string, unknown> }) => {
+            const asset = assets.find((item) => item.id === where.id);
+            if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
+            Object.assign(asset, data);
+            return { count: 1 };
           },
           update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
             const asset = assets.find((item) => item.id === where.id);
@@ -309,11 +334,17 @@ describe("media completion recovery", () => {
     const assets: Array<Record<string, unknown>> = [];
     const assetById = new Map<string, Record<string, unknown>>();
     const assetByDeduplicationKey = new Map<string, Record<string, unknown>>();
+    let assetReadyWrites = 0;
+    let signalUploadStarted!: () => void;
+    const uploadStarted = new Promise<void>((resolve) => {
+      signalUploadStarted = resolve;
+    });
     let uploadRelease: (() => void) | undefined;
     const uploadGate = new Promise<void>((resolve) => {
       uploadRelease = resolve;
     });
     const put = vi.fn(async () => {
+      signalUploadStarted();
       await uploadGate;
     });
     const upsertAsset = async ({ create }: { create: Record<string, unknown> }) => {
@@ -330,9 +361,30 @@ describe("media completion recovery", () => {
     const updateAsset = async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
       const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
       if (!asset) throw new Error("ASSET_NOT_FOUND");
+      if (data.status === "READY") assetReadyWrites += 1;
       Object.assign(asset, data);
       assetById.set(asset.id as string, asset);
       return asset;
+    };
+    const findAsset = async ({ where }: { where: { id?: string; deduplicationKey?: string } }) => {
+      if (where.id) return assetById.get(where.id) ?? null;
+      if (where.deduplicationKey) return assetByDeduplicationKey.get(where.deduplicationKey) ?? null;
+      return null;
+    };
+    const updateManyAssets = async ({ where, data }: {
+      where: { id: string; status?: string; updatedAt?: Date | { lt: Date } };
+      data: Record<string, unknown>;
+    }) => {
+      const asset = assetById.get(where.id);
+      if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
+      if (where.updatedAt instanceof Date && (asset.updatedAt as Date).getTime() !== where.updatedAt.getTime()) {
+        return { count: 0 };
+      }
+      if (where.updatedAt && !(where.updatedAt instanceof Date)
+        && (asset.updatedAt as Date) >= where.updatedAt.lt) return { count: 0 };
+      if (data.status === "READY") assetReadyWrites += 1;
+      Object.assign(asset, data);
+      return { count: 1 };
     };
     const prisma = {
       media: {
@@ -357,22 +409,18 @@ describe("media completion recovery", () => {
         }
       },
       mediaAsset: {
-        findUnique: async ({ where }: { where: { id: string } }) => {
-          const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
-          return asset ?? null;
-        },
+        findUnique: findAsset,
         upsert: upsertAsset,
-        update: updateAsset
+        update: updateAsset,
+        updateMany: updateManyAssets
       },
       $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
         $executeRaw: async () => undefined,
         mediaAsset: {
-          findUnique: async ({ where }: { where: { id: string } }) => {
-            const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
-            return asset ?? null;
-          },
+          findUnique: findAsset,
           upsert: upsertAsset,
-          update: updateAsset
+          update: updateAsset,
+          updateMany: updateManyAssets
         },
         media: {
           updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
@@ -400,7 +448,10 @@ describe("media completion recovery", () => {
 
     const service = new MediaService(prisma, albums, storage);
     const first = service.complete("user-1", "media-1");
+    await uploadStarted;
     const second = service.complete("user-1", "media-2");
+    await vi.waitFor(() => expect(mediaRecords[1].mediaAssetId).toBe("asset-1"));
+    expect(put).toHaveBeenCalledTimes(3);
     uploadRelease?.();
     await expect(Promise.all([first, second])).resolves.toEqual([
       { mediaId: "media-1", status: "READY" },
@@ -408,6 +459,7 @@ describe("media completion recovery", () => {
     ]);
     expect(assets).toHaveLength(1);
     expect(put).toHaveBeenCalledTimes(3);
+    expect(assetReadyWrites).toBe(1);
   });
 
   it("completes an MP4 upload with its generated thumbnail", async () => {
@@ -434,8 +486,14 @@ describe("media completion recovery", () => {
       $executeRaw: async () => undefined,
       mediaAsset: {
         upsert: async ({ create }: { create: Record<string, unknown> }) => {
-          asset = { id: "asset-video", ...create };
+          asset = { id: "asset-video", ...create, updatedAt: new Date() };
           return asset;
+        },
+        findUnique: async () => asset,
+        updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
+          if (!asset || (where.status && asset.status !== where.status)) return { count: 0 };
+          Object.assign(asset, data);
+          return { count: 1 };
         },
         update: async ({ data }: { data: Record<string, unknown> }) => {
           Object.assign(asset!, data);
@@ -503,7 +561,8 @@ describe("media completion recovery", () => {
       originalKey: "assets/family-1/hash/original",
       displayKey: "assets/family-1/hash/display.webp",
       thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      status: "ORPHANED"
+      status: "ORPHANED",
+      updatedAt: new Date()
     };
     let storedAsset: typeof asset | null = null;
     const media = {
@@ -529,6 +588,11 @@ describe("media completion recovery", () => {
         upsert: async () => {
           storedAsset = asset;
           return storedAsset;
+        },
+        updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
+          if (!storedAsset || (where.status && storedAsset.status !== where.status)) return { count: 0 };
+          Object.assign(storedAsset, data);
+          return { count: 1 };
         },
         update: async ({ data }: { data: Record<string, unknown> }) => {
           Object.assign(asset, data);
@@ -609,7 +673,8 @@ describe("media completion recovery", () => {
       originalKey: "assets/family-1/hash/original",
       displayKey: "assets/family-1/hash/display.webp",
       thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      status: "READY"
+      status: "READY",
+      updatedAt: new Date()
     };
     const updateMedia = (data: Record<string, unknown>, target = media) => {
       Object.assign(target, data);
@@ -652,6 +717,8 @@ describe("media completion recovery", () => {
           $executeRaw: async () => undefined,
           mediaAsset: {
             upsert: async () => asset,
+            findUnique: async () => asset,
+            updateMany: async () => ({ count: 0 }),
             update: async ({ data }: { data: Record<string, unknown> }) => {
               Object.assign(asset, data);
               return asset;
@@ -697,6 +764,7 @@ describe("media completion recovery", () => {
     expect((failure as ServiceUnavailableException).getResponse()).toMatchObject({
       code: "MEDIA_PROCESSING_FAILED"
     });
+    expect(asset.status).toBe("READY");
     await expect(mediaItems.complete("user-1", "media-1")).resolves.toEqual({
       mediaId: "media-1",
       status: "READY"
@@ -727,7 +795,8 @@ describe("media completion recovery", () => {
       originalKey: "assets/family-1/hash/original",
       displayKey: "assets/family-1/hash/display.webp",
       thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      status: "READY"
+      status: "READY",
+      updatedAt: new Date()
     };
     const updateMedia = (data: Record<string, unknown>) => {
       Object.assign(media, data);
@@ -757,6 +826,8 @@ describe("media completion recovery", () => {
           $executeRaw: async () => undefined,
           mediaAsset: {
             upsert: async () => asset,
+            findUnique: async () => asset,
+            updateMany: async () => ({ count: 0 }),
             update: async ({ data }: { data: Record<string, unknown> }) => {
               Object.assign(asset, data);
               return asset;
@@ -830,7 +901,11 @@ describe("media completion recovery", () => {
         },
         findUnique: async () => ({ ...media })
       },
-      mediaAsset: { upsert: async () => asset }
+      mediaAsset: {
+        upsert: async () => asset,
+        findUnique: async () => asset,
+        updateMany: async () => ({ count: 0 })
+      }
     };
     const prisma = {
       media: {
@@ -889,6 +964,12 @@ describe("media completion recovery", () => {
       $executeRaw: async () => undefined,
       mediaAsset: {
         upsert: async () => asset,
+        findUnique: async () => asset,
+        updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
+          if (where.status && asset.status !== where.status) return { count: 0 };
+          Object.assign(asset, data);
+          return { count: 1 };
+        },
         update: async ({ data }: { data: Record<string, unknown> }) => {
           Object.assign(asset, data);
           return asset;
@@ -1927,7 +2008,9 @@ describe("unfinished media deletion", () => {
       originalKey: "assets/family-1/hash/original",
       displayKey: "assets/family-1/hash/display.webp",
       thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      status: "READY"
+      deduplicationKey: "enabled:family-1:hash",
+      status: "READY",
+      updatedAt: new Date()
     };
     const deleteAsset = vi.fn(async () => ({ id: "asset-1" }));
     const prisma = {
@@ -1954,6 +2037,11 @@ describe("unfinished media deletion", () => {
             },
             mediaAsset: {
               findUnique: async () => asset,
+              updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
+                if (where.status && asset.status !== where.status) return { count: 0 };
+                Object.assign(asset, data);
+                return { count: 1 };
+              },
               update: async ({ data }: { data: { status: "READY" | "ORPHANED" | "DELETING" } }) => {
                 asset.status = data.status;
                 return asset;
@@ -1997,7 +2085,9 @@ describe("unfinished media deletion", () => {
       originalKey: "assets/family-1/hash/original",
       displayKey: "assets/family-1/hash/display.webp",
       thumbnailKey: "assets/family-1/hash/thumbnail.webp",
-      status: "READY"
+      deduplicationKey: "enabled:family-1:hash",
+      status: "READY",
+      updatedAt: new Date()
     };
     const tx = {
       $executeRaw: async () => undefined,
@@ -2015,6 +2105,11 @@ describe("unfinished media deletion", () => {
       },
       mediaAsset: {
         findUnique: async () => asset,
+        updateMany: async ({ where, data }: { where: { status?: string }; data: Record<string, unknown> }) => {
+          if (where.status && asset.status !== where.status) return { count: 0 };
+          Object.assign(asset, data);
+          return { count: 1 };
+        },
         update: async ({ data }: { data: Record<string, unknown> }) => {
           Object.assign(asset, data);
           return asset;
