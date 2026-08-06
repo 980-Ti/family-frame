@@ -10,6 +10,7 @@ import { PrismaService } from "../src/common/prisma.service.js";
 import { StorageService } from "../src/media/storage.service.js";
 
 const integration = process.env.RUN_INTEGRATION === "1";
+const originalMaxActiveUploads = process.env.MAX_ACTIVE_UPLOADS_PER_USER;
 const onePixelPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADElEQVQImWNQ6n4GAAJmAZTWXMniAAAAAElFTkSuQmCC",
   "base64"
@@ -23,6 +24,7 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
   let userId: string | undefined;
 
   beforeAll(async () => {
+    process.env.MAX_ACTIVE_UPLOADS_PER_USER = "5";
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
     app.setGlobalPrefix("api");
@@ -52,6 +54,8 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
     }
     if (userId && prisma) await prisma.user.deleteMany({ where: { id: userId } });
     if (app) await app.close();
+    if (originalMaxActiveUploads === undefined) delete process.env.MAX_ACTIVE_UPLOADS_PER_USER;
+    else process.env.MAX_ACTIVE_UPLOADS_PER_USER = originalMaxActiveUploads;
   });
 
   it("migrates, authenticates, uploads, transforms, lists, and downloads a private media", async () => {
@@ -158,5 +162,56 @@ describe.runIf(integration)("real PostgreSQL and S3 application boundary", () =>
       .set("Cookie", sessionCookie)
       .expect(200);
     expect((await fetch(signedAfterTagDelete.body.url as string)).ok).toBe(true);
+
+    const pendingPayload = (clientUploadId: string) => ({
+      date: "2026-08-03",
+      originalName: "pending.png",
+      contentType: "image/png",
+      fileSize: onePixelPng.length,
+      clientUploadId
+    });
+    await Promise.all(Array.from({ length: 4 }, async () =>
+      request(app.getHttpServer())
+        .post(`/api/albums/${albumId}/uploads`)
+        .set("Cookie", sessionCookie)
+        .send(pendingPayload(randomUUID()))
+        .expect(201)));
+
+    const competing = await Promise.all([
+      request(app.getHttpServer())
+        .post(`/api/albums/${albumId}/uploads`)
+        .set("Cookie", sessionCookie)
+        .send(pendingPayload(randomUUID())),
+      request(app.getHttpServer())
+        .post(`/api/albums/${albumId}/uploads`)
+        .set("Cookie", sessionCookie)
+        .send(pendingPayload(randomUUID()))
+    ]);
+    expect(competing.map(({ status }) => status).sort()).toEqual([201, 429]);
+    expect(competing.find(({ status }) => status === 429)?.body).toMatchObject({
+      code: "UPLOAD_CONCURRENCY_LIMIT"
+    });
+
+    const accepted = competing.find(({ status }) => status === 201);
+    expect(accepted?.body.mediaId).toBeTruthy();
+    await request(app.getHttpServer())
+      .delete(`/api/media/${accepted?.body.mediaId}`)
+      .set("Cookie", sessionCookie)
+      .expect(200);
+
+    const idempotentUploadId = randomUUID();
+    const repeated = await Promise.all([
+      request(app.getHttpServer())
+        .post(`/api/albums/${albumId}/uploads`)
+        .set("Cookie", sessionCookie)
+        .send(pendingPayload(idempotentUploadId))
+        .expect(201),
+      request(app.getHttpServer())
+        .post(`/api/albums/${albumId}/uploads`)
+        .set("Cookie", sessionCookie)
+        .send(pendingPayload(idempotentUploadId))
+        .expect(201)
+    ]);
+    expect(repeated[0].body.mediaId).toBe(repeated[1].body.mediaId);
   }, 30_000);
 });

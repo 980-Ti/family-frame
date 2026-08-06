@@ -19,7 +19,8 @@ const tags = [
 
 async function createTestApp(
   validTagCount: number,
-  staleMedia: { id: string; tempObjectKey: string | null }[] = []
+  staleMedia: { id: string; tempObjectKey: string | null }[] = [],
+  userActiveCount = 0
 ) {
   let activeCount = staleMedia.length ? 10 : 0;
   const deleteObject = vi.fn(async () => undefined);
@@ -42,7 +43,8 @@ async function createTestApp(
           activeCount -= staleMedia.length;
           return { count: staleMedia.length };
         },
-        count: async () => activeCount,
+        count: async ({ where }: { where: { uploadedById?: string } }) =>
+          where.uploadedById ? userActiveCount : activeCount,
         create: async ({ data }: {
           data: {
             capturedAt?: Date;
@@ -205,5 +207,19 @@ describe("media child tag API", () => {
 
     expect((app as INestApplication & { deleteObject: ReturnType<typeof vi.fn> }).deleteObject)
       .toHaveBeenCalledWith("temp/family-1/stale-media");
+  });
+
+  it("returns HTTP 429 when the user already has five active uploads", async () => {
+    app = await createTestApp(0, [], 5);
+
+    const response = await request(app.getHttpServer())
+      .post("/albums/album-1/uploads")
+      .send(uploadRequest)
+      .expect(429);
+
+    expect(response.body).toMatchObject({
+      code: "UPLOAD_CONCURRENCY_LIMIT",
+      message: "동시에 최대 5개의 파일만 업로드할 수 있습니다."
+    });
   });
 });

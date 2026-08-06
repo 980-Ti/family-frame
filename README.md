@@ -25,6 +25,8 @@ npx --yes pnpm@10.15.0 dev:all
 
 각 Media는 자신만의 MediaAsset과 비공개 RGW 객체 세트를 가집니다. 브라우저가 presigned URL로 임시 객체를 올리면 백엔드가 파일을 검증하고 이미지 또는 영상을 처리한 뒤 `assets/{familyId}/{mediaId}` 아래에 original, display, thumbnail을 저장합니다. 파일 내용이 같아도 다른 Media의 Asset이나 객체를 조회하거나 공유하지 않습니다.
 
+`MAX_ACTIVE_UPLOADS_PER_USER`는 한 사용자가 동시에 유지할 수 있는 `PENDING_UPLOAD`와 `PROCESSING` Media 수를 제한하며 기본값은 5입니다. 프론트엔드도 선택한 파일을 최대 5개씩 병렬 전송하고, 완료되거나 실패한 자리에 다음 파일을 투입합니다.
+
 `20260806020000_remove_media_deduplication` migration은 `Media.mediaAssetId`를 1:1 관계로 변경합니다. 기존 DB에 하나의 MediaAsset을 참조하는 Media가 둘 이상 있으면 migration은 데이터를 임의 삭제하거나 분리하지 않고 중단됩니다. 배포 전에 다음 쿼리 결과가 비어 있는지 확인하고, 결과가 있으면 보존할 객체와 Media를 운영 정책에 따라 수동 전환해야 합니다.
 
 ```sql

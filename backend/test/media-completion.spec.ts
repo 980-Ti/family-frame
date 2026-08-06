@@ -1083,7 +1083,8 @@ describe("media completion recovery", () => {
       $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
         $executeRaw: async () => undefined,
         media: {
-          count: async () => 10,
+          count: async ({ where }: { where: { uploadedById?: string } }) =>
+            where.uploadedById ? 0 : 10,
           updateMany: async () => ({ count: 1 })
         }
       })
@@ -1377,7 +1378,8 @@ describe("media completion recovery", () => {
       $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
         $executeRaw: async () => undefined,
         media: {
-          count: async () => 10,
+          count: async ({ where }: { where: { uploadedById?: string } }) =>
+            where.uploadedById ? 0 : 10,
           updateMany: async () => ({ count: 1 })
         }
       })
@@ -1681,7 +1683,9 @@ describe("media upload idempotency", () => {
         $executeRaw: async () => undefined,
         media: {
           findUnique: async () => existing,
-          count: async () => 10
+          count: async ({ where }: { where: { uploadedById?: string } }) =>
+            where.uploadedById ? 0 : 10,
+          update: async () => existing
         }
       })
     } as unknown as PrismaService;

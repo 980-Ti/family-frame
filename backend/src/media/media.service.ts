@@ -13,13 +13,14 @@ import { randomUUID } from "node:crypto";
 import sharp from "sharp";
 import { PrismaService } from "../common/prisma.service.js";
 import { parseAlbumDate } from "../common/album-date.js";
+import { env } from "../common/env.js";
 import {
   EMPTY_MEDIA_FILTER,
   mediaFilterWhere,
   type MediaFilter
 } from "../common/media-filter.js";
 import { AlbumsService } from "../albums/albums.service.js";
-import { assertDailyMediaCapacity, canDeleteMedia } from "./policies.js";
+import { assertActiveUploadCapacity, assertDailyMediaCapacity, canDeleteMedia } from "./policies.js";
 import { StorageObjectError, StorageService } from "./storage.service.js";
 import type { StartUploadDto } from "./media.dto.js";
 import {
@@ -29,6 +30,7 @@ import {
 } from "./video-processor.js";
 
 const ACTIVE_STATUSES = ["PENDING_UPLOAD", "PROCESSING", "READY"] as const;
+const ACTIVE_UPLOAD_STATUSES = ["PENDING_UPLOAD", "PROCESSING"] as const;
 const UPLOAD_EXPIRY_MS = 30 * 60 * 1000;
 const ASSET_DELETION_EXPIRY_MS = 2 * 60 * 1000;
 const CLEANUP_INTERVAL_MS = 60_000;
@@ -169,6 +171,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     const albumDate = parseAlbumDate(dto.date);
 
     const { media, expiredMedia } = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`upload-user:${userId}`}))`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`${albumId}:${dto.date}`}))`;
       let existing = await tx.media.findUnique({
         where: { albumId_clientUploadId: { albumId, clientUploadId: dto.clientUploadId } },
@@ -200,17 +203,21 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           !existing.tempObjectKey &&
           !existing.mediaAssetId;
         if (existing.status === "FAILED" || retryExpiredUpload) {
+          const userActiveCount = await tx.media.count({
+            where: { uploadedById: userId, status: { in: [...ACTIVE_UPLOAD_STATUSES] } }
+          });
+          assertActiveUploadCapacity(userActiveCount, env.maxActiveUploadsPerUser);
           const activeCount = await tx.media.count({
             where: { albumId, albumDate, status: { in: [...ACTIVE_STATUSES] } }
           });
           assertDailyMediaCapacity(activeCount);
-        }
-        if (retryExpiredUpload) {
           existing = await tx.media.update({
             where: { id: existing.id },
             data: {
               status: "PENDING_UPLOAD",
-              tempObjectKey: `temp/${album.familyId}/${randomUUID()}`,
+              tempObjectKey: retryExpiredUpload
+                ? `temp/${album.familyId}/${randomUUID()}`
+                : existing.tempObjectKey,
               failureReason: null
             },
             include: { childTags: { include: { childTag: true } } }
@@ -254,6 +261,10 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         });
         if (expired.count) expiredMedia.push(candidate);
       }
+      const userActiveCount = await tx.media.count({
+        where: { uploadedById: userId, status: { in: [...ACTIVE_UPLOAD_STATUSES] } }
+      });
+      assertActiveUploadCapacity(userActiveCount, env.maxActiveUploadsPerUser);
       const activeCount = await tx.media.count({
         where: { albumId, albumDate, status: { in: [...ACTIVE_STATUSES] } }
       });
@@ -379,8 +390,13 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       data: { status: "PROCESSING", failureReason: null, updatedAt: claimTime }
     });
     const claimFailedMedia = () => this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`upload-user:${userId}`}))`;
       const lockKey = `${media.albumId}:${media.albumDate.toISOString().slice(0, 10)}`;
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
+      const userActiveCount = await tx.media.count({
+        where: { uploadedById: userId, status: { in: [...ACTIVE_UPLOAD_STATUSES] } }
+      });
+      assertActiveUploadCapacity(userActiveCount, env.maxActiveUploadsPerUser);
       const activeCount = await tx.media.count({
         where: { albumId: media.albumId, albumDate: media.albumDate, status: { in: [...ACTIVE_STATUSES] } }
       });

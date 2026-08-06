@@ -73,7 +73,8 @@ describe("client API requests", () => {
     const error = await clientApi("/media/media-1/complete").catch((error: unknown) => error as Error & { code?: string });
 
     expect(error).toBeInstanceOf(Error);
+    if (!(error instanceof Error)) throw new Error("clientApi did not return an Error");
     expect(error.message).toBe("영상 파일이 올바르지 않습니다.");
-    expect(error.code).toBe("INVALID_VIDEO");
+    expect((error as Error & { code?: string }).code).toBe("INVALID_VIDEO");
   });
 });

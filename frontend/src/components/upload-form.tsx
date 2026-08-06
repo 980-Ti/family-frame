@@ -35,6 +35,32 @@ type UploadStart = {
   uploadUrl: string | null;
 };
 
+export const MAX_PARALLEL_UPLOADS = 5;
+
+export async function runUploadQueue<T>(
+  items: readonly T[],
+  uploadItem: (item: T) => Promise<void>
+): Promise<PromiseSettledResult<void>[]> {
+  const results = new Array<PromiseSettledResult<void>>(items.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < items.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      try {
+        await uploadItem(items[index]);
+        results[index] = { status: "fulfilled", value: undefined };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(MAX_PARALLEL_UPLOADS, items.length) }, () => worker())
+  );
+  return results;
+}
+
 const DATE_SOURCE_LABEL: Record<MediaDateSource, string> = {
   EXIF_ORIGINAL: "사진 촬영일",
   EXIF_CREATED: "사진 생성일",
@@ -254,10 +280,8 @@ export function UploadForm({
     if (!pendingMedia.length) return;
     setUploading(true);
     setMessage("");
-    let completed = 0;
-    let failed = 0;
     try {
-      for (const media of pendingMedia) {
+      const results = await runUploadQueue(pendingMedia, async (media) => {
         setMediaItems((current) =>
           current.map((item) =>
             item.id === media.id
@@ -280,14 +304,12 @@ export function UploadForm({
             method: "POST"
           });
           await waitForMediaReady(start.mediaId);
-          completed += 1;
           setMediaItems((current) =>
             current.map((item) =>
               item.id === media.id ? { ...item, status: "done" } : item
             )
           );
         } catch (error) {
-          failed += 1;
           const detail = error instanceof Error
             ? error.message
             : "파일을 올리지 못했습니다.";
@@ -298,8 +320,11 @@ export function UploadForm({
                 : item
             )
           );
+          throw error;
         }
-      }
+      });
+      const completed = results.filter(({ status }) => status === "fulfilled").length;
+      const failed = results.length - completed;
 
       if (failed) {
         setMessage(`${completed}개 완료 · ${failed}개 실패했습니다. 실패한 파일만 다시 시도해 주세요.`);

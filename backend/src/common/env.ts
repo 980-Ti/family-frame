@@ -16,6 +16,12 @@ function positiveInteger(name: string, fallback: number): number {
   return value;
 }
 
+function boundedPositiveInteger(name: string, fallback: number, maximum: number): number {
+  const value = positiveInteger(name, fallback);
+  if (value > maximum) throw new Error(`${name} must be at most ${maximum}`);
+  return value;
+}
+
 export const env = {
   get port() {
     return positiveInteger("PORT", 4000);
@@ -34,6 +40,9 @@ export const env = {
   },
   get signedUrlTtl() {
     return positiveInteger("SIGNED_URL_TTL_SECONDS", 300);
+  },
+  get maxActiveUploadsPerUser() {
+    return boundedPositiveInteger("MAX_ACTIVE_UPLOADS_PER_USER", 5, 20);
   },
   get s3() {
     return {
