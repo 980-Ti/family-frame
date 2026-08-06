@@ -67,6 +67,25 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     private readonly storage: StorageService
   ) {}
 
+  private assetLockKey(deduplicationKey: string): string {
+    return `asset:${deduplicationKey}`;
+  }
+
+  private async waitForAssetReady(assetId: string): Promise<void> {
+    const deadline = Date.now() + 10_000;
+    let attempts = 0;
+    while (Date.now() < deadline) {
+      const asset = await this.prisma.mediaAsset.findUnique({
+        where: { id: assetId },
+        select: { status: true }
+      });
+      if (asset?.status === "READY") return;
+      attempts += 1;
+      if (attempts >= 20) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+  }
+
   onModuleInit(): void {
     // ponytail: each API replica runs this idempotent DB-backed sweep; use a dedicated worker only if cleanup volume grows.
     this.cleanupTimer = setInterval(() => void this.cleanupAbandonedMedia(), CLEANUP_INTERVAL_MS);
@@ -361,6 +380,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     // ponytail: process-local gate; move processing to a shared queue when API instances scale horizontally.
     const releaseMediaProcessingSlot = await acquireMediaProcessingSlot();
     let cleanupVideoSource: (() => Promise<void>) | undefined;
+    let assetIdForRecovery: string | null = null;
     try {
     const claimTime = new Date();
     const claimMedia = (tx: PrismaService, allowFailed = false) => tx.media.updateMany({
@@ -517,7 +537,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
       }
 
       const reservation = await this.prisma.$transaction(async (tx) => {
-        const assetLockKey = `asset:${deduplicationKey}`;
+        const assetLockKey = this.assetLockKey(deduplicationKey);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
         let asset = await tx.mediaAsset.upsert({
           where: { deduplicationKey },
@@ -545,6 +565,14 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
             data: { status: "ORPHANED" }
           });
         }
+        let needsUpload = false;
+        if (asset.status === "ORPHANED") {
+          asset = await tx.mediaAsset.update({
+            where: { id: asset.id },
+            data: { status: "UPLOADING" }
+          });
+          needsUpload = true;
+        }
         const reserved = await tx.media.updateMany({
           where: { id: media.id, status: "PROCESSING", updatedAt: claimTime },
           data: { mediaAssetId: asset.id, updatedAt: claimTime }
@@ -555,11 +583,14 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
             message: "미디어 상태가 변경되어 처리를 완료하지 않았습니다."
           });
         }
+        assetIdForRecovery = asset.id;
         return {
           asset,
-          needsUpload: asset.status !== "READY"
+          needsUpload,
+          waitForAssetReady: !needsUpload
         };
       });
+      assetIdForRecovery = reservation.asset.id;
       const performedStorageUpload = reservation.needsUpload;
       if (performedStorageUpload) {
         await Promise.all([
@@ -570,8 +601,11 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
           this.storage.put(thumbnailKey, thumbnail, "image/webp")
         ]);
       }
+      if (reservation.waitForAssetReady) {
+        await this.waitForAssetReady(reservation.asset.id);
+      }
       const ready = await this.prisma.$transaction(async (tx) => {
-        const assetLockKey = `asset:${deduplicationKey}`;
+        const assetLockKey = this.assetLockKey(deduplicationKey);
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${assetLockKey}))`;
         const lockKey = `${media.albumId}:${media.albumDate.toISOString().slice(0, 10)}`;
         await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
@@ -624,6 +658,12 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
         response && typeof response === "object" && "code" in response && typeof response.code === "string"
           ? response.code
           : "MEDIA_PROCESSING_FAILED";
+      if (assetIdForRecovery) {
+        await this.prisma.mediaAsset.update({
+          where: { id: assetIdForRecovery },
+          data: { status: "ORPHANED" }
+        }).catch(() => undefined);
+      }
       let failed;
       try {
         failed = await this.prisma.media.updateMany({
@@ -685,7 +725,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     const candidate = await this.prisma.$transaction(async (tx) => {
       const candidate = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!candidate) return null;
-      const lockKey = `asset:${candidate.familyId}:${candidate.deduplicationKey}`;
+      const lockKey = this.assetLockKey(candidate.deduplicationKey);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!asset) return null;
@@ -722,7 +762,7 @@ export class MediaService implements OnModuleInit, OnModuleDestroy {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      const lockKey = `asset:${candidate.familyId}:${candidate.deduplicationKey}`;
+      const lockKey = this.assetLockKey(candidate.deduplicationKey);
       await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${lockKey}))`;
       const asset = await tx.mediaAsset.findUnique({ where: { id: mediaAssetId } });
       if (!asset || asset.status !== "DELETING") return;

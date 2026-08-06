@@ -149,31 +149,57 @@ describe("media completion recovery", () => {
   it("creates separate assets for duplicate images when deduplication is disabled", async () => {
     process.env.MEDIA_DEDUPLICATION_ENABLED = "false";
 
-    const media = {
-      id: "media-1",
-      albumId: "album-1",
-      albumDate: new Date("2026-08-03T00:00:00.000Z"),
-      uploadedById: "user-1",
-      originalName: "baby.png",
-      uploadContentType: "image/png",
-      uploadSize: png.length,
-      tempObjectKey: "temp/family-1/media-1",
-      mediaAssetId: null as string | null,
-      status: "PENDING_UPLOAD",
-      album: { id: "album-1", familyId: "family-1" },
-      mediaAsset: null as Record<string, unknown> | null
-    };
+    const mediaRecords = [
+      {
+        id: "media-1",
+        albumId: "album-1",
+        albumDate: new Date("2026-08-03T00:00:00.000Z"),
+        uploadedById: "user-1",
+        originalName: "baby.png",
+        uploadContentType: "image/png",
+        uploadSize: png.length,
+        tempObjectKey: "temp/family-1/media-1",
+        mediaAssetId: null as string | null,
+        status: "PENDING_UPLOAD",
+        album: { id: "album-1", familyId: "family-1" },
+        mediaAsset: null as Record<string, unknown> | null
+      },
+      {
+        id: "media-2",
+        albumId: "album-1",
+        albumDate: new Date("2026-08-03T00:00:00.000Z"),
+        uploadedById: "user-1",
+        originalName: "baby.png",
+        uploadContentType: "image/png",
+        uploadSize: png.length,
+        tempObjectKey: "temp/family-1/media-2",
+        mediaAssetId: null as string | null,
+        status: "PENDING_UPLOAD",
+        album: { id: "album-1", familyId: "family-1" },
+        mediaAsset: null as Record<string, unknown> | null
+      }
+    ];
     const assets: Array<Record<string, unknown>> = [];
     const prisma = {
       media: {
-        findUnique: async () => ({ ...media, mediaAsset: null }),
-        updateMany: async ({ data }: { data: Record<string, unknown> }) => {
-          Object.assign(media, data);
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          const current = mediaRecords.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          const asset = assets.find((asset) => asset.id === current.mediaAssetId);
+          return { ...current, mediaAsset: asset ?? null };
+        },
+        updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaRecords.find((item) => item.id === where.id);
+          if (!current) return { count: 0 };
+          Object.assign(current, data);
           return { count: 1 };
         },
-        update: async ({ data }: { data: Record<string, unknown> }) => {
-          Object.assign(media, data);
-          return { ...media, mediaAsset: assets[0] ?? null };
+        update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaRecords.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          Object.assign(current, data);
+          const asset = assets.find((asset) => asset.id === current.mediaAssetId);
+          return { ...current, mediaAsset: asset ?? null };
         }
       },
       mediaAsset: {
@@ -205,11 +231,18 @@ describe("media completion recovery", () => {
           }
         },
         media: {
-          updateMany: async ({ data }: { data: Record<string, unknown> }) => {
-            Object.assign(media, data);
+          updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+            const current = mediaRecords.find((item) => item.id === where.id);
+            if (!current) return { count: 0 };
+            Object.assign(current, data);
             return { count: 1 };
           },
-          findUnique: async () => ({ ...media, mediaAsset: assets[0] ?? null })
+          findUnique: async ({ where }: { where: { id: string } }) => {
+            const current = mediaRecords.find((item) => item.id === where.id);
+            if (!current) throw new Error("MEDIA_NOT_FOUND");
+            const asset = assets.find((asset) => asset.id === current.mediaAssetId);
+            return { ...current, mediaAsset: asset ?? null };
+          }
         },
         dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
       })
@@ -224,6 +257,155 @@ describe("media completion recovery", () => {
 
     const service = new MediaService(prisma, albums, storage);
     await expect(service.complete("user-1", "media-1")).resolves.toEqual({ mediaId: "media-1", status: "READY" });
+    await expect(service.complete("user-1", "media-2")).resolves.toEqual({ mediaId: "media-2", status: "READY" });
+
+    expect(assets).toHaveLength(2);
+    expect(assets.map((asset) => asset.deduplicationMode)).toEqual(["DISABLED", "DISABLED"]);
+    expect(assets[0].deduplicationKey).not.toBe(assets[1].deduplicationKey);
+    expect(assets[0].originalKey).not.toBe(assets[1].originalKey);
+    expect(assets[0].displayKey).not.toBe(assets[1].displayKey);
+    expect(assets[0].thumbnailKey).not.toBe(assets[1].thumbnailKey);
+    expect(put).toHaveBeenCalledTimes(6);
+  });
+
+  it("uses a shared asset lock helper for asset lifecycle transitions", async () => {
+    const service = new MediaService({} as PrismaService, {} as AlbumsService, {} as StorageService);
+    expect((service as unknown as { assetLockKey: (key: string) => string }).assetLockKey("enabled:family-1:abc")).toBe("asset:enabled:family-1:abc");
+  });
+
+  it("avoids duplicate uploads when two enabled completions race for the same asset", async () => {
+    process.env.MEDIA_DEDUPLICATION_ENABLED = "true";
+
+    const mediaRecords = [
+      {
+        id: "media-1",
+        albumId: "album-1",
+        albumDate: new Date("2026-08-03T00:00:00.000Z"),
+        uploadedById: "user-1",
+        originalName: "baby.png",
+        uploadContentType: "image/png",
+        uploadSize: png.length,
+        tempObjectKey: "temp/family-1/media-1",
+        mediaAssetId: null as string | null,
+        status: "PENDING_UPLOAD",
+        album: { id: "album-1", familyId: "family-1" },
+        mediaAsset: null as Record<string, unknown> | null
+      },
+      {
+        id: "media-2",
+        albumId: "album-1",
+        albumDate: new Date("2026-08-03T00:00:00.000Z"),
+        uploadedById: "user-1",
+        originalName: "baby.png",
+        uploadContentType: "image/png",
+        uploadSize: png.length,
+        tempObjectKey: "temp/family-1/media-2",
+        mediaAssetId: null as string | null,
+        status: "PENDING_UPLOAD",
+        album: { id: "album-1", familyId: "family-1" },
+        mediaAsset: null as Record<string, unknown> | null
+      }
+    ];
+    const assets: Array<Record<string, unknown>> = [];
+    const assetById = new Map<string, Record<string, unknown>>();
+    const assetByDeduplicationKey = new Map<string, Record<string, unknown>>();
+    let uploadRelease: (() => void) | undefined;
+    const uploadGate = new Promise<void>((resolve) => {
+      uploadRelease = resolve;
+    });
+    const put = vi.fn(async () => {
+      await uploadGate;
+    });
+    const upsertAsset = async ({ create }: { create: Record<string, unknown> }) => {
+      const key = create.deduplicationKey ? String(create.deduplicationKey) : null;
+      if (key && assetByDeduplicationKey.has(key)) {
+        return assetByDeduplicationKey.get(key)!;
+      }
+      const asset = { id: `asset-${assets.length + 1}`, ...create, status: "ORPHANED", updatedAt: new Date() };
+      assets.push(asset);
+      assetById.set(asset.id as string, asset);
+      if (key) assetByDeduplicationKey.set(key, asset);
+      return asset;
+    };
+    const updateAsset = async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+      const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
+      if (!asset) throw new Error("ASSET_NOT_FOUND");
+      Object.assign(asset, data);
+      assetById.set(asset.id as string, asset);
+      return asset;
+    };
+    const prisma = {
+      media: {
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          const current = mediaRecords.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          const asset = assets.find((asset) => asset.id === current.mediaAssetId);
+          return { ...current, mediaAsset: asset ?? null };
+        },
+        updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaRecords.find((item) => item.id === where.id);
+          if (!current) return { count: 0 };
+          Object.assign(current, data);
+          return { count: 1 };
+        },
+        update: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+          const current = mediaRecords.find((item) => item.id === where.id);
+          if (!current) throw new Error("MEDIA_NOT_FOUND");
+          Object.assign(current, data);
+          const asset = assets.find((asset) => asset.id === current.mediaAssetId);
+          return { ...current, mediaAsset: asset ?? null };
+        }
+      },
+      mediaAsset: {
+        findUnique: async ({ where }: { where: { id: string } }) => {
+          const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
+          return asset ?? null;
+        },
+        upsert: upsertAsset,
+        update: updateAsset
+      },
+      $transaction: async (work: (tx: unknown) => Promise<unknown>) => work({
+        $executeRaw: async () => undefined,
+        mediaAsset: {
+          findUnique: async ({ where }: { where: { id: string } }) => {
+            const asset = assetById.get(where.id) ?? assets.find((item) => item.id === where.id);
+            return asset ?? null;
+          },
+          upsert: upsertAsset,
+          update: updateAsset
+        },
+        media: {
+          updateMany: async ({ where, data }: { where: { id: string }; data: Record<string, unknown> }) => {
+            const current = mediaRecords.find((item) => item.id === where.id);
+            if (!current) return { count: 0 };
+            Object.assign(current, data);
+            return { count: 1 };
+          },
+          findUnique: async ({ where }: { where: { id: string } }) => {
+            const current = mediaRecords.find((item) => item.id === where.id);
+            if (!current) throw new Error("MEDIA_NOT_FOUND");
+            const asset = assets.find((asset) => asset.id === current.mediaAssetId);
+            return { ...current, mediaAsset: asset ?? null };
+          }
+        },
+        dailyRepresentative: { upsert: async () => ({ id: "representative-1" }) }
+      })
+    } as unknown as PrismaService;
+    const albums = { requireAlbum: async () => ({ album: { familyId: "family-1" } }) } as unknown as AlbumsService;
+    const storage = {
+      read: async () => ({ bytes: png, contentType: "image/png" }),
+      put,
+      delete: async () => undefined
+    } as unknown as StorageService;
+
+    const service = new MediaService(prisma, albums, storage);
+    const first = service.complete("user-1", "media-1");
+    const second = service.complete("user-1", "media-2");
+    uploadRelease?.();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      { mediaId: "media-1", status: "READY" },
+      { mediaId: "media-2", status: "READY" }
+    ]);
     expect(assets).toHaveLength(1);
     expect(put).toHaveBeenCalledTimes(3);
   });
@@ -376,6 +558,10 @@ describe("media completion recovery", () => {
         upsert: async () => {
           storedAsset = asset;
           return storedAsset;
+        },
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(asset, data);
+          return asset;
         }
       },
       $transaction: transaction
@@ -445,7 +631,11 @@ describe("media completion recovery", () => {
       },
       mediaAsset: {
         findUnique: async () => asset,
-        upsert: async () => asset
+        upsert: async () => asset,
+        update: async ({ data }: { data: Record<string, unknown> }) => {
+          Object.assign(asset, data);
+          return asset;
+        }
       },
       dailyRepresentative: {
         upsert: async () => {

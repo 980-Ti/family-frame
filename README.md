@@ -25,10 +25,11 @@ npx --yes pnpm@10.15.0 dev:all
 
 `MEDIA_DEDUPLICATION_ENABLED`는 실험용 환경변수로 기본값은 `true`입니다. `false`는 운영 기능이 아니라 실험용 baseline이며, 동일한 파일이라도 각 Media마다 별도의 MediaAsset와 RGW 객체 경로를 생성합니다. 해시 계산, 이미지 변환, 영상 처리, DB 상태 전이, 업로드 API 흐름은 그대로 유지됩니다.
 
-- 활성화(`true`): 같은 가족의 동일 파일은 기존 MediaAsset을 재사용하고 RGW 업로드를 생략합니다.
+- 활성화(`true`): 같은 가족의 동일 파일은 기존 MediaAsset을 재사용하고 RGW 업로드를 생략합니다. 동시에 완료되는 두 요청도 같은 에셋에 대해 한 번만 업로드를 수행하도록 보장합니다.
 - 비활성화(`false`): 같은 가족의 동일 파일도 별도의 MediaAsset과 RGW 객체를 생성합니다.
 - 실험 A/B 사이에는 DB와 RGW 데이터를 초기화하거나 별도 DB/Bucket를 사용해야 공정한 비교가 가능합니다.
 - 동일 데이터셋, 동일 순서, 동일 동시성 조건으로 반복 실험하는 것을 권장합니다.
+- 배포 시에는 새 마이그레이션 파일 [backend/prisma/migrations/20260806010000_media_asset_uploading/migration.sql](backend/prisma/migrations/20260806010000_media_asset_uploading/migration.sql)과 함께 `prisma migrate deploy`가 실행되도록 해야 합니다.
 
 ```powershell
 $env:MEDIA_DEDUPLICATION_ENABLED = "true"

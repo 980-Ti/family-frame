@@ -32,6 +32,7 @@ enum MediaDateSource {
 enum AssetStatus {
   READY
   ORPHANED
+  UPLOADING
   DELETING
 }
 
