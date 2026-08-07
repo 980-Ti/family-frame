@@ -1,0 +1,16 @@
+Family Frame has been rendered for namespace {{ .Release.Namespace }}.
+
+Frontend service:
+  {{ include "family-frame.fullname" . }}-frontend:{{ .Values.frontend.service.port }}
+Backend service:
+  {{ include "family-frame.fullname" . }}-backend:{{ .Values.backend.service.port }}
+
+{{- if .Values.ingress.enabled }}
+Ingress:
+  frontend: {{ .Values.ingress.frontend.host }}{{ .Values.ingress.frontend.path }}
+  backend:  {{ .Values.ingress.backend.host }}{{ .Values.ingress.backend.path }}
+{{- end }}
+
+The release expects Secret {{ .Values.existingSecret.name }} to exist in
+namespace {{ .Release.Namespace }} before installation. Check the migration hook
+Job and backend readiness before directing production traffic to the release.

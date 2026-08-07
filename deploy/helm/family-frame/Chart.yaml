@@ -1,0 +1,6 @@
+apiVersion: v2
+name: family-frame
+description: Helm chart for the Family Frame frontend and backend deployments
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
